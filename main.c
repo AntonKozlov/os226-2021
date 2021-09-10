@@ -29,34 +29,27 @@ int function_call(int count_words, char **words){
 
 char *get_string(int *len) {
 
-    *len = 0; // изначально строка пуста
-    int capacity = 1; // ёмкость контейнера динамической строки (1, так как точно будет '\0')
-    char *s = (char*) malloc(sizeof(char)); // динамическая пустая строка
-
+    *len = 0;
+    int capacity = 1;
+    char *s = (char*) malloc(sizeof(char));
     char c = (char)getchar();
     if ( c != '\n' ) {
-    } // символ для чтения данных
-    // читаем символы, пока не получим символ переноса строки (\n)
-    while (c != '\n' && c != ';' && c!=EOF) {
-        s[(*len)++] = c; // заносим в строку новый символ
-
-        // если реальный размер больше размера контейнера, то увеличим его размер
-        if (*len >= capacity) {
-            capacity *= 2; // увеличиваем ёмкость строки в два раза
-            s = (char*) realloc(s, capacity * sizeof(char)); // создаём новую строку с увеличенной ёмкостью
-        }
-
-        c = (char)getchar(); // считываем следующий символ
     }
-
-    s[*len] = '\0'; // завершаем строку символом конца строки
-    return s; // возвращаем указатель на считанную строку
+    while (c != '\n' && c != ';' && c!=EOF) {
+        s[(*len)++] = c;
+        if (*len >= capacity) {
+            capacity *= 2;
+            s = (char*) realloc(s, capacity * sizeof(char));
+        }
+        c = (char)getchar();
+    }
+    s[*len] = '\0';
+    return s;
 }
 int parsing (){
     while (1){
-        int len; // длина строки
-
-        char *str = get_string(&len); // считываем динамическую строку
+        int len;
+        char *str = get_string(&len);
         int count_words = 0;
         char *buf = strtok(str, " ");
         char **words = NULL;
