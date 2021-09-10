@@ -11,9 +11,7 @@ int ret_code;
 
 void free_string_array(char **arr, int arr_length) {
     for (int i = 0; i < arr_length; ++i) {
-        if (strlen(arr[i]) > 0) {
-            free(arr[i]);
-        }
+        free(arr[i]);
     }
     free(arr);
 }
