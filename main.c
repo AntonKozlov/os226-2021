@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#define ASSERT_NOT_NULL(x) if (x == NULL) return ERROR;
+
 #define ECHO "echo"
 #define RETCODE "retcode"
 
@@ -30,55 +32,44 @@ int retcode(int argc, char* argv[]) {
     return OK;
 }
 
-int parse_stdin(char**** commands_container, int** command_sizes_container, int* command_num_container) {
-    char line[MAX_LINE_LEN];
+int parse_command(char* command, char*** tokens_container, int* tokens_num_container) {
+    char** tokens = NULL;
+    int tokens_num = 0;
+    char* token = strtok(command, " ");
 
-    char*** commands = NULL;
-    int* command_sizes = NULL;
-    int command_num = 0;
-
-    while (fgets(line, MAX_LINE_LEN, stdin) != NULL) { // Reading lines
-        char* command = strtok(line, ";\n");
-
-        while (command != NULL) { // Reading commands
-            char** tokens = NULL;
-            int tokens_num = 0;
-            char* token = strtok(command, " ");
-
-            while (token != NULL) { // Reading tokens
-                if (strcmp(token, "\0") != 0) {
-                    if (extend((void**) &tokens, tokens_num++, sizeof(char*)) != 1) {
-                        fprintf(stderr, "Allocation failed for token %d in command %d\n", tokens_num, command_num);
-                        return ERROR;
-                    }
-                    tokens[tokens_num - 1] = token;
-                }
-
-                token = strtok(NULL, " ");
+    while (token != NULL) { // Reading tokens
+        if (strcmp(token, "\0") != 0) {
+            if (extend((void**) &tokens, tokens_num++, sizeof(char*)) != 1) {
+                fprintf(stderr, "Allocation failed for token %d\n", tokens_num);
+                return ERROR;
             }
-
-            if (tokens_num > 0) {
-                if (extend((void**) &commands, command_num++, sizeof(char**)) != 1 ||
-                    extend((void**) &command_sizes, command_num, sizeof(int*)) != 1) {
-                    fprintf(stderr, "Allocate failed for command %d\n", command_num - 1);
-                    return ERROR;
-                }
-                commands[command_num - 1] = tokens;
-                command_sizes[command_num - 1] = tokens_num - 1;
-            }
-
-            command = strtok(NULL, ";");
+            tokens[tokens_num - 1] = token;
         }
+
+        token = strtok(NULL, " ");
     }
 
-    *commands_container = commands;
-    *command_num_container = command_num;
-    *command_sizes_container = command_sizes;
+    *tokens_container = tokens;
+    *tokens_num_container = tokens_num;
 
     return OK;
 }
 
-int execute(char* executable, int argc, char** argv) {
+int add_command(char**** commands_cont, int** command_sizes_cont, int* command_num_cont,
+                char** tokens, int tokens_num) {
+    if (tokens_num > 0) {
+        if (extend((void**) commands_cont, (*command_num_cont)++, sizeof(char**)) != 1 ||
+            extend((void**) command_sizes_cont, *command_num_cont, sizeof(int*)) != 1) {
+            fprintf(stderr, "Allocation failed for command %d\n", *command_num_cont - 1);
+            return ERROR;
+        }
+        (*commands_cont)[(*command_num_cont) - 1] = tokens;
+        (*command_sizes_cont)[(*command_num_cont) - 1] = tokens_num;
+    }
+    return OK;
+}
+
+int execute(char* executable, int argc, char* argv[]) {
     if (strcmp(executable, ECHO) == 0) {
         return_code = echo(argc, argv);
     } else if (strcmp(executable, RETCODE) == 0) {
@@ -90,19 +81,34 @@ int execute(char* executable, int argc, char** argv) {
 }
 
 int main(int argc, char* argv[]) {
-    char*** commands = NULL;
-    int* command_sizes = NULL;
-    int command_num = 0;
+    char line[MAX_LINE_LEN];
 
-    if (parse_stdin(&commands, &command_sizes, &command_num) != OK) {
-        fprintf(stderr, "Error parsing stdin\n");
-        return ERROR;
-    }
+    while (fgets(line, MAX_LINE_LEN, stdin) != NULL) { // Reading lines
+        char*** commands = NULL;
+        int* command_sizes = NULL;
+        int command_num = 0;
 
-    for (int i = 0; i < command_num; i++) {
-        if (execute(commands[i][0], command_sizes[i], &(commands[i][1])) != OK) {
-            fprintf(stderr, "Error executing %s\n", commands[i][0]);
-            return ERROR;
+        char* command = strtok(line, ";\n");
+
+        while (command != NULL) { // Reading commands
+            char** tokens = NULL;
+            int tokens_num = 0;
+
+            if (parse_command(command, &tokens, &tokens_num) != OK ||
+            add_command(&commands, &command_sizes, &command_num, tokens, tokens_num) != OK) {
+                return ERROR;
+            }
+
+            command = strtok(NULL, ";");
+        }
+
+        for (int i = 0; i < command_num; i++) {
+            ASSERT_NOT_NULL(commands)
+            ASSERT_NOT_NULL(command_sizes)
+            if (execute(commands[i][0], command_sizes[i], commands[i]) != OK) {
+                fprintf(stderr, "Error executing %s\n", commands[i][0]);
+                return ERROR;
+            }
         }
     }
 
