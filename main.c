@@ -25,13 +25,9 @@ int retcode(int argc, char* argv[]) {
     return OK;
 }
 
-int extend(void** array, int new_length, size_t elem_size) {
-    *array = realloc(*array, new_length * elem_size);
-    return *array != NULL;
-}
-
 int add_raw_command(char*** raw_commands_container, int* command_num_container, char* raw_command) {
-    if (extend((void**) raw_commands_container, (*command_num_container)++, sizeof(char*)) != OK) {
+    *raw_commands_container = realloc(*raw_commands_container, (++(*command_num_container)) * sizeof(char*));
+    if (*raw_commands_container == NULL) {
         fprintf(stderr, "Allocation failed for raw command %d\n", *command_num_container - 1);
         return ERROR;
     }
@@ -45,13 +41,12 @@ int parse_command(char*** tokens_container, int* tokens_num_container, char* com
     char* token = strtok(command, " ");
 
     while (token != NULL) {
-        if (*token != '\0') {
-            if (extend((void**) &tokens, tokens_num++, sizeof(char*)) != OK) {
-                fprintf(stderr, "Allocation failed for token %d\n", tokens_num);
-                return ERROR;
-            }
-            tokens[tokens_num - 1] = token;
+        tokens = realloc(tokens, (++tokens_num) * sizeof(char*));
+        if (tokens == NULL) {
+            fprintf(stderr, "Allocation failed for token %d\n", tokens_num);
+            return ERROR;
         }
+        tokens[tokens_num - 1] = token;
 
         token = strtok(NULL, " ");
     }
@@ -84,10 +79,7 @@ int main(int argc, char* argv[]) {
         // Reading commands
         char* command = strtok(line, ";\n");
         while (command != NULL) {
-            if (add_raw_command(&raw_commands, &command_num, command) != OK) {
-                fprintf(stderr, "Error reading command %s\n", command);
-                return ERROR;
-            }
+            if (add_raw_command(&raw_commands, &command_num, command) != OK) return ERROR;
             command = strtok(NULL, ";\n");
         }
 
@@ -95,19 +87,15 @@ int main(int argc, char* argv[]) {
         char** commands[command_num];
         int command_sizes[command_num];
         for (int i = 0; i < command_num; i++) {
-            if (parse_command(&(commands[i]), &(command_sizes[i]), raw_commands[i]) != OK) {
-                fprintf(stderr, "Error parsing command %s\n", raw_commands[i]);
-                return ERROR;
-            }
-
-            if (execute(commands[i][0], command_sizes[i], commands[i]) != OK) {
-                fprintf(stderr, "Error executing %s\n", commands[i][0]);
+            if (parse_command(&(commands[i]), &(command_sizes[i]), raw_commands[i]) != OK ||
+                execute(commands[i][0], command_sizes[i], commands[i]) != OK) {
                 return ERROR;
             }
 
             free(commands[i]);
-            free(raw_commands[i]);
         }
+
+        free(raw_commands);
     }
 
     return OK;
