@@ -1,104 +1,179 @@
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_NUM_OF_COMMANDS 64
+#define MAX_NUM_OF_CMDS 64
 #define MAX_NUM_OF_ARGS 128
-#define MAX_STRING_LENGTH 512
-#define SPECIAL_DELIMETER ";"
-#define POSSIBLE_DELIMETERS " \t\r\n\v\f"
+#define MAX_STR_LEN 512
+#define INT_TO_STR_ARR_SIZE 64
+#define CMD_SEPARATOR ";"
+#define DELIMITERS " \t\r\n\v\f"
 
-#define ARRAY_SIZE(x)  (sizeof(x) / sizeof((x)[0]))
-
-int last_echo_return_code;
-
-char* builtin_cmds_str[] =  {
+char* builtin_cmds[] = {
   "echo",
   "retcode"
 };
 
-int echo(int argc, char *argv[]) {
-	for (int i = 1; i < argc; ++i) {
+int echo(int argc, char* argv[]) { // Changed 1 to 2 because of "formatted_data" structure
+	for (int i = 2; i < argc; i++) {
 		printf("%s%c", argv[i], i == argc - 1 ? '\n' : ' ');
 	}
-	return argc - 1;
+
+	return argc - 2;
 }
 
-int retcode(int argc, char *argv[]) {
+int retcode(int argc, char* argv[]) {
+  printf("%d\n", argc - 2);
 }
 
-void parse_step_2(char** not_formatted_cmds, int cmd_arg_counter) {
-  char formatted_cmds[cmd_arg_counter][MAX_NUM_OF_ARGS][MAX_STRING_LENGTH];
-  int number_of_args[MAX_NUM_OF_ARGS];
+char* allocate_char_array(size_t size1) {
+  char* array = (char*) malloc(size1 * sizeof(char));
 
-  for(int i = 0; i < cmd_arg_counter; i++) {
-    int counter = 0;
-    char *token;
-    token = strtok(not_formatted_cmds[i], POSSIBLE_DELIMETERS);
-    while(token != NULL) {
-      strcpy(formatted_cmds[i][counter++], token);
-      token = strtok(NULL, POSSIBLE_DELIMETERS);
-    }
+  return array;
+}
 
-    number_of_args[i] = counter;
+int* allocate_int_array(size_t size1) {
+  int* array = (int*) malloc(size1 * sizeof(int));
+
+  return array;
+}
+
+char** allocate_double_string_array(size_t size1, size_t size2) { // From greater to lower
+  char** array = (char**) malloc(size1 * sizeof(char*));
+  for(size_t i = 0; i < size1; i++) {
+    array[i] = (char*) malloc(size2 * sizeof(char));
   }
 
-  for(int i = 0; i < MAX_NUM_OF_COMMANDS; i++) free(not_formatted_cmds[i]);
-	free(not_formatted_cmds);
+  return array;
+}
 
-  for(int i = 0; i < cmd_arg_counter; i++) {
-    int builtin_cmds_size = ARRAY_SIZE(builtin_cmds_str);
-    for(int j = 0; j < builtin_cmds_size; j++) {
-      if(!strcmp(builtin_cmds_str[j], formatted_cmds[i][0])) {
-          int array_size = number_of_args[i];
-          char str[MAX_STRING_LENGTH];
-          if(!strcmp(builtin_cmds_str[j], "echo")) {
-            last_echo_return_code = array_size - 1;
-            for(int k = 1; k < array_size; k++) {
-              printf("%s ", formatted_cmds[i][k]);
-            }
+char*** allocate_triple_string_array(size_t size1, size_t size2, size_t size3) {
+  char*** array = (char***) malloc(size1 * sizeof(char**));
+  for(size_t i = 0; i < size1; i++) {
+    array[i]  = (char**) malloc(size2 * sizeof(char*));
+    for(size_t j = 0; j < size2; j++) {
+      array[i][j]  = (char*) malloc(size3 * sizeof(char));
+    }
+  }
 
-						//echo(array_size, formatted_cmds[i]);
+  return array;
+}
 
-            printf("\n"); // For seeing result properly
-          }
+void free_char_array(char* array) {
+  free(array);
+}
 
-          if(!strcmp(builtin_cmds_str[j], "retcode")) { // A little weird thing
-            printf("%d\n", last_echo_return_code);
-          }
+void free_int_array(int* array) {
+  free(array);
+}
+
+void free_double_string_array(size_t size1, char** array) {
+  for(size_t i = 0; i < size1; i++) {
+    free(array[i]);
+  }
+
+  free(array);
+}
+
+void free_triple_string_array(size_t size1, size_t size2, char*** array) {
+  for(size_t i = 0; i < size1; i++) {
+    for(size_t j = 0; j < size2; j++) {
+      free(array[i][j]);
+    }
+
+    free(array[i]);
+  }
+
+  free(array);
+}
+
+void parse_commands(int line_counter, char*** formatted_data) {
+  for(int i = 0; i < line_counter; i++) {
+    if(!strcmp(formatted_data[i][1], builtin_cmds[0])) {
+      echo(atoi(formatted_data[i][0]), formatted_data[i]);
+    }
+
+    if(!strcmp(formatted_data[i][1], builtin_cmds[1])) {
+      if(i > 0) {
+        retcode(atoi(formatted_data[i - 1][0]), formatted_data[i]);
+      }
+
+      else { // If the first cmd would be "retcode", return 0
+        retcode(2, NULL);
       }
     }
   }
-
 }
 
-void parse_step_1() { // Separating commands+args when ";"
-  char *str = (char*) malloc(MAX_STRING_LENGTH * sizeof(char)); // Input String
-  char **not_formatted_cmds = (char**) malloc(MAX_NUM_OF_COMMANDS * sizeof(char*)); // Not-Formated commands array
-  for(int i = 0; i < MAX_NUM_OF_COMMANDS; i++) {
-    not_formatted_cmds[i] = (char*) malloc(MAX_STRING_LENGTH * sizeof(char));
-  }
+int process_input() {
+  char* input_str = allocate_char_array(MAX_STR_LEN);
+  if(input_str == NULL) return 1;
 
-  int cmd_arg_counter = 0; // Used for counting number of pairs (command, args)
+  char** not_formatted_data = allocate_double_string_array(MAX_NUM_OF_CMDS, MAX_STR_LEN);
+  if(not_formatted_data == NULL) return 1;
+
+  int line_counter = 0;
+
 	while(!feof(stdin)) {
-    fgets(str, MAX_STRING_LENGTH, stdin);
+    fgets(input_str, MAX_STR_LEN, stdin);
 
     char *token;
-    token = strtok(str, SPECIAL_DELIMETER);
+    token = strtok(input_str, CMD_SEPARATOR);
 
     while(token != NULL) {
-        strcpy(not_formatted_cmds[cmd_arg_counter++], token);
-        token = strtok(NULL, SPECIAL_DELIMETER);
+        strcpy(not_formatted_data[line_counter++], token);
+        token = strtok(NULL, CMD_SEPARATOR);
     }
   }
 
-  free(str);
+  free_char_array(input_str);
 
-  parse_step_2(not_formatted_cmds, cmd_arg_counter);
+  char* int_to_string_array = allocate_char_array(INT_TO_STR_ARR_SIZE);
+  if(int_to_string_array == NULL) return 1;
+
+  char*** formatted_data = allocate_triple_string_array(line_counter, MAX_NUM_OF_ARGS, MAX_STR_LEN);
+  if(formatted_data == NULL) return 1;
+
+  int offset = 0; // Used for eliminating empty lines
+  for(int i = 0; i < line_counter; i++) {
+    int counter = 1;
+
+    char *token;
+    token = strtok(not_formatted_data[i], DELIMITERS);
+
+    if(token != NULL) {
+      while(token != NULL) {
+        strcpy(formatted_data[i - offset][counter++], token);
+        token = strtok(NULL, DELIMITERS);
+      }
+
+      sprintf(int_to_string_array, "%d", counter);
+      strcpy(formatted_data[i - offset][0], int_to_string_array);
+    }
+
+    else {
+      offset++;
+    }
+  }
+
+  line_counter -= offset;
+
+  free_char_array(int_to_string_array);
+  free_double_string_array(MAX_NUM_OF_CMDS, not_formatted_data);
+
+  parse_commands(line_counter, formatted_data);
+
+  free_triple_string_array(line_counter, MAX_NUM_OF_ARGS, formatted_data);
+
+  return 0;
+}
+
+int execute_command_parser() {
+  return process_input();
 }
 
 int main(int argc, char *argv[]) {
-	parse_step_1();
+  if(execute_command_parser()) return execute_command_parser();
+
 	return 0;
 }
