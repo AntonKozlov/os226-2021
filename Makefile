@@ -3,4 +3,4 @@ CFLAGS = -g
 all : main
 
 clean :
-	rm -f *.o main
+	$(RM) *.o main
