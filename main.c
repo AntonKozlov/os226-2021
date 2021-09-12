@@ -60,15 +60,14 @@ int commandExecutionProcess(int count_of_commands, char** arrayOfCommands) {
 
         if (!strcmp(array_with_args[0], "echo")) {
             echo(length_of_array_with_args, array_with_args);
-            free_string_array(array_with_args, length_of_array_with_args);
         } else if (!strcmp(array_with_args[0], "retcode")) {
             retcode(length_of_array_with_args, array_with_args);
-            free_string_array(array_with_args, length_of_array_with_args);
         } else {
             printf("Unknown command\n");
             free_string_array(array_with_args, length_of_array_with_args);
             return UNKNOWN_COMMAND;
         }
+        free_string_array(array_with_args, length_of_array_with_args);
 
     }
     free_string_array(arrayOfCommands, count_of_commands);
