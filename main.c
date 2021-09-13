@@ -76,12 +76,12 @@ int main(int argc, char *argv[]) {
     while (fgets(line, 1024, stdin) != NULL) {
 
         char *save;
-        char *com = strtok_r(line, "\n", &save);
+        char *com = strtok_r(line, "\n;", &save);
 
         while (com != NULL) {
 
             run(com);
-            com = strtok_r(NULL, "\n", &save);
+            com = strtok_r(NULL, "\n;", &save);
 
         }
 
