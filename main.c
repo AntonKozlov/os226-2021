@@ -24,7 +24,7 @@ int echo(int argc, char *argv[]) {
 
 }
 
-int retcode(int argc, char *argv[]) {
+int retcode() {
 
     printf("%d\n", code);
 
@@ -39,7 +39,7 @@ type_com commands[] = {
 
 };
 
-size_t count = sizeof(commands) / sizeof(type_com);
+size_t com_c = sizeof(commands) / sizeof(type_com);
 
 void run(char *com) {
 
@@ -47,7 +47,6 @@ void run(char *com) {
     char *argv[1024];
     char *save;
     char *arg = strtok_r(com, " ", &save);
-    char *command_name = argv[0];
 
     while (arg != NULL) {
 
@@ -56,9 +55,11 @@ void run(char *com) {
 
     }
 
-    for (size_t i = 0; i < count; i++)
+    char *com_n = argv[0];
 
-        if (strcmp(command_name, commands[i].name) == 0) {
+    for (size_t i = 0; i < com_c; i++)
+
+        if (strcmp(com_n, commands[i].name) == 0) {
 
             code = commands[i].func(argc, argv);
 
