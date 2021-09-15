@@ -4,16 +4,17 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-static int g_retcode;
+#include "pool.h"
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof(*(a)))
+static int g_retcode;
 
 #define APPS_X(X) \
         X(echo) \
         X(retcode) \
+        X(pooltest) \
 
 
-#define DECLARE(X) int X(int, char *[]);
+#define DECLARE(X) static int X(int, char *[]);
 APPS_X(DECLARE)
 #undef DECLARE
 
@@ -26,19 +27,19 @@ static const struct app {
 #undef ELEM
 };
 
-int echo(int argc, char *argv[]) {
+static int echo(int argc, char *argv[]) {
 	for (int i = 1; i < argc; ++i) {
 		printf("%s%c", argv[i], i == argc - 1 ? '\n' : ' ');
 	}
 	return argc - 1;
 }
 
-int retcode(int argc, char *argv[]) {
+static int retcode(int argc, char *argv[]) {
 	printf("%d\n", g_retcode);
 	return 0;
 }
 
-int exec(int argc, char *argv[]) {
+static int exec(int argc, char *argv[]) {
 	const struct app *app = NULL;
 	for (int i = 0; i < ARRAY_SIZE(app_list); ++i) {
 		if (!strcmp(argv[0], app_list[i].name)) {
@@ -54,6 +55,26 @@ int exec(int argc, char *argv[]) {
 
 	g_retcode = app->fn(argc, argv);
 	return g_retcode;
+}
+
+static int pooltest(int argc, char *argv[]) {
+	struct obj {
+		void *field1;
+		void *field2;
+	};
+	static struct obj objmem[4];
+	static struct pool objpool = POOL_INITIALIZER_ARRAY(objmem);
+
+	if (!strcmp(argv[1], "alloc")) {
+		struct obj *o = pool_alloc(&objpool);
+		printf("alloc %d\n", o ? (o - objmem) : -1);
+		return 0;
+	} else if (!strcmp(argv[1], "free")) {
+		int iobj = atoi(argv[2]);
+		printf("free %d\n", iobj);
+		pool_free(&objpool, objmem + iobj);
+		return 0;
+	}
 }
 
 int shell(int argc, char *argv[]) {
