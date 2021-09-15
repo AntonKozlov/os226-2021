@@ -3,8 +3,6 @@
 
 #define MAX_COMMANDS 256
 #define MAX_LENGTH 256
-#define ECHO_LENGTH 4
-#define RETCODE_LENGTH 7
 #define COMMAND_DELIM ";\n"
 #define WORD_DELIM " \n"
 
@@ -42,9 +40,9 @@ int cmd() {
                 words[count_of_words++] = word;
                 word = strtok(NULL, WORD_DELIM);
             }
-            if (strncmp(words[0], "echo", ECHO_LENGTH) == 0) {
+            if (strcmp(words[0], "echo") == 0) {
                 return_code = echo(count_of_words, words);
-            } else if (strncmp(words[0], "retcode", RETCODE_LENGTH) == 0) {
+            } else if (strcmp(words[0], "retcode") == 0) {
                 char * argv[128];
                 char buffer[MAX_LENGTH];
                 sprintf(buffer, "%d", return_code);
