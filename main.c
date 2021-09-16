@@ -2,16 +2,26 @@
 #include <stdio.h>
 #include <string.h>
 
+// DEFINITIONS
+
+#define MAX_INPUT_LINE_LEN 1024
+#define COMMAND_DELIM ";\n"
+#define TOKEN_DELIM " "
+
+// COMMANDS
+
 #define ECHO "echo"
 #define RETCODE "retcode"
 
-#define MAX_LINE_LEN 1024
+// GLOBALS
 
 enum RETURN_CODES {
     OK, ERROR
 };
 
-int return_code = OK;
+int last_return_code = OK;
+
+// EXECUTABLES
 
 int echo(int argc, char* argv[]) {
     for (int i = 1; i < argc; i++) {
@@ -21,81 +31,74 @@ int echo(int argc, char* argv[]) {
 }
 
 int retcode(int argc, char* argv[]) {
-    printf("%d\n", return_code);
+    printf("%d\n", last_return_code);
     return OK;
 }
 
-int add_raw_command(char*** raw_commands_container, int* command_num_container, char* raw_command) {
-    *raw_commands_container = realloc(*raw_commands_container, (++(*command_num_container)) * sizeof(char*));
-    if (*raw_commands_container == NULL) {
-        fprintf(stderr, "Allocation failed for raw command %d\n", *command_num_container - 1);
-        return ERROR;
-    }
-    (*raw_commands_container)[(*command_num_container) - 1] = raw_command;
-    return OK;
-}
+// HELPER FUNCTIONS
 
-int parse_command(char*** tokens_container, int* tokens_num_container, char* command) {
-    char** tokens = NULL;
-    int tokens_num = 0;
-    char* token = strtok(command, " ");
+int divide_str(char* source, char* delim, char*** container, int* container_size) {
+    *container = NULL;
+    *container_size = 0;
 
+    char* token = strtok(source, delim);
     while (token != NULL) {
-        tokens = realloc(tokens, (++tokens_num) * sizeof(char*));
-        if (tokens == NULL) {
-            fprintf(stderr, "Allocation failed for token %d\n", tokens_num);
+        *container = realloc(*container, ++(*container_size) * sizeof(char*));
+        if (*container == NULL) {
+            fprintf(stderr, "String division failed at token %d\n", *container_size);
             return ERROR;
         }
-        tokens[tokens_num - 1] = token;
-
-        token = strtok(NULL, " ");
+        (*container)[(*container_size) - 1] = token;
+        token = strtok(NULL, delim);
     }
-
-    *tokens_container = tokens;
-    *tokens_num_container = tokens_num;
 
     return OK;
 }
 
-int execute(char* executable, int argc, char* argv[]) {
-    if (strcmp(executable, ECHO) == 0) {
-        return_code = echo(argc, argv);
-    } else if (strcmp(executable, RETCODE) == 0) {
-        return_code = retcode(argc, argv);
-    } else {
+int execute(int tokens_num, char** tokens) {
+    if (tokens_num <= 0) return OK;
+
+    if (strcmp(tokens[0], ECHO) == 0) {
+        last_return_code = echo(tokens_num, tokens);
+    } else if (strcmp(tokens[0], RETCODE) == 0) {
+        last_return_code = retcode(tokens_num, tokens);
+    } else if (printf("Unknown command: %s\n", tokens[0])) {
+        fprintf(stderr, "Cannot print to stdin\n");
         return ERROR;
     }
+
     return OK;
 }
 
+// MAIN
+
 int main(int argc, char* argv[]) {
-    char line[MAX_LINE_LEN];
+    char line[MAX_INPUT_LINE_LEN];
 
-    // Reading lines
-    while (fgets(line, MAX_LINE_LEN, stdin) != NULL) {
-        char** raw_commands = NULL;
-        int command_num = 0;
+    while (fgets(line, MAX_INPUT_LINE_LEN, stdin) != NULL) {
+        char** commands;
+        int command_num;
 
-        // Reading commands
-        char* command = strtok(line, ";\n");
-        while (command != NULL) {
-            if (add_raw_command(&raw_commands, &command_num, command) != OK) return ERROR;
-            command = strtok(NULL, ";\n");
+        if (divide_str(line, COMMAND_DELIM, &commands, &command_num) != OK) {
+            free(commands);
+            return ERROR;
         }
 
-        // Reading tokens and executing
-        char** commands[command_num];
-        int command_sizes[command_num];
         for (int i = 0; i < command_num; i++) {
-            if (parse_command(&(commands[i]), &(command_sizes[i]), raw_commands[i]) != OK ||
-                execute(commands[i][0], command_sizes[i], commands[i]) != OK) {
+            char** tokens;
+            int token_num;
+
+            if (divide_str(commands[i], TOKEN_DELIM, &tokens, &token_num) != OK ||
+                execute(token_num, tokens) != OK) {
+                free(tokens);
+                free(commands);
                 return ERROR;
             }
 
-            free(commands[i]);
+            free(tokens);
         }
 
-        free(raw_commands);
+        free(commands);
     }
 
     return OK;
