@@ -1,0 +1,39 @@
+#!/usr/bin/awk -f
+
+1 # echo everything
+
+BEGIN {
+	NOBJ = 4
+	ecode = 0
+}
+
+function error(msg) {
+	print msg
+	ecode = 1
+}
+
+$1 == "alloc" && $2 == -1 {
+	for (i = 0; i < NOBJ; ++i)
+		if (!o[i]) {
+			error("cannot alloc but " i " is free")
+			break;
+		}
+}
+
+$1 == "alloc" && 0 <= $2 {
+	if (o[$2])
+		error($2 " already allocated!")
+	o[$2] = 1
+}
+
+$1 == "free" {
+	if (!o[$2])
+		error($2 " should be allocated at this point")
+	o[$2] = 0
+
+}
+
+END {
+	exit(ecode)
+}
+
