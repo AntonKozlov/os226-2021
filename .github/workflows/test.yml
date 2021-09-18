@@ -4,6 +4,7 @@ name: Test os226
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
