@@ -21,26 +21,21 @@ static int return_code = OK;
 
 /* --------------- After preprocessing... ----------
  *
- * static int echo(int, char *[]);
- * static int retcode(int, char *[]);
- * static int pooltest(int, char *[]);
+ * static int echo(int, char *[]); ...
  *
  * static const struct app {
  *      const char *name;
  *      int (*fn)(int, char *[]);
  * } app_list[] = {
- *      { "echo", echo },
- *      { "retcode", retcode },
- *      { "pooltest", pooltest },
+ *      { "echo", echo }, ...
  * };
  * -------------------------------------------------
 */
 
-#define APPS_X(X) \
-        X(echo) \
-        X(retcode) \
-        X(pooltest) \
-
+#define APPS_X(X)           \
+        X(echo)             \
+        X(retcode)          \
+        X(pooltest)
 
 #define DECLARE(X) static int X(int, char *[]);
 
@@ -60,9 +55,9 @@ static const struct app{
 
 //-------------------------------------------------------------------------------------------------------- DECLARATIONS
 
-int exec_commands(char** tokens, int tnk_num);
+int exec_commands(int, char**);
 
-int parse_with_delim(char* buf, char*** commands, int* cmd_num, const char* delim);
+int parse_with_delim(char*, char***, int*, const char*);
 
 //----------------------------------------------------------------------------------------------------------------------
 
@@ -80,7 +75,7 @@ int retcode(int argc, char* argv[]) {
     else return OK;
 }
 
-int exec_commands(char** tokens, const int tnk_num) {
+int exec_commands(const int token_num, char** tokens) {
     char* cmd_name = tokens[0];
     const struct app* app = NULL;
     for (int i = 0; i < ARRAY_SIZE(app_list); ++i) {
@@ -93,22 +88,23 @@ int exec_commands(char** tokens, const int tnk_num) {
     if (!app) {
         if (printf("%s: command not found\n", cmd_name) < 0)
             return ERROR;
-        return NOT_FOUND_COMMAND_ERROR;
+        return_code = NOT_FOUND_COMMAND_ERROR;
+        return OK;
     }
 
-    return_code = app->fn(tnk_num, tokens);
+    return_code = app->fn(token_num, tokens);
     return OK;
 }
 
-int parse_with_delim(char* buf, char*** commands, int* cmd_num, const char* delim) {
-    *commands = NULL;
-    *cmd_num = 0;
+int parse_with_delim(char* buf, char*** container, int* container_size, const char* delim) {
+    *container = NULL;
+    *container_size = 0;
     char* cmd = strtok(buf, delim);
     while (cmd) {
-        *commands = realloc(*commands, sizeof(char*) * ++(*cmd_num));
-        if (!*commands)
+        *container = realloc(*container, sizeof(char*) * ++(*container_size));
+        if (!*container)
             return ERROR;
-        (*commands)[(*cmd_num) - 1] = cmd;
+        (*container)[(*container_size) - 1] = cmd;
         cmd = strtok(NULL, delim);
     }
     return OK;
@@ -127,14 +123,14 @@ static int pooltest(int argc, char* argv[]) {
     if (!strcmp(argv[1], "alloc")) {
         struct obj* o = pool_alloc(&objpool);
         printf("alloc %ld\n", o ? (o - objmem) : -1);
-        return 0;
+        return OK;
     } else if (!strcmp(argv[1], "free")) {
         int iobj = (int) strtol(argv[2], NULL, 10);
         printf("free %d\n", iobj);
         pool_free(&objpool, objmem + iobj);
-        return 0;
+        return OK;
     }
-    return 0;
+    return OK;
 }
 
 //---------------------------------------------------------------------------------------------------------------- MAIN
@@ -143,16 +139,16 @@ int main(int argc, char* argv[]) {
     char buf[MAX_INPUT_STRING_LENGTH];
     while (fgets(buf, MAX_INPUT_STRING_LENGTH, stdin) != NULL) {
         char** commands;
-        int cmd_num;
-        if (parse_with_delim(buf, &commands, &cmd_num, COMMAND_DELIM) != 0) {
+        int command_num;
+        if (parse_with_delim(buf, &commands, &command_num, COMMAND_DELIM) != 0) {
             free(commands);
             return ERROR;
         }
-        for (int i = 0; i < cmd_num; i++) {
+        for (int i = 0; i < command_num; i++) {
             char** tokens;
-            int tnk_num;
-            if (parse_with_delim(commands[i], &tokens, &tnk_num, TOKEN_DELIM) != 0 ||
-                exec_commands(tokens, tnk_num) != 0) {
+            int token_num;
+            if (parse_with_delim(commands[i], &tokens, &token_num, TOKEN_DELIM) != 0 ||
+                exec_commands(token_num, tokens) != 0) {
                 free(tokens);
                 free(commands);
                 return ERROR;
