@@ -1,104 +1,114 @@
-#include <stdio.h>
-#include <stdlib.h>
+
+#include <stdbool.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 
-#define MAX_COMMAND_LENGTH 512
-#define MAX_NUM_OF_COMMANDS 64
-#define MAX_NUM_OF_ARGS 64
-#define UNKNOWN_COMMAND -1
-#define SEPARATOR_FOR_THE_COMMANDS ";\n"
-#define POSSIBLE_SEPARATORS " \t\r\n\v\f"
+#include "pool.h"
 
-int last_return;
+static int g_retcode;
 
-void free_string_array(char **arr, int arr_length) {
-    for (int i = 0; i < arr_length; ++i) {
-        free(arr[i]);
-    }
-    free(arr);
+#define APPS_X(X) \
+        X(echo) \
+        X(retcode) \
+        X(pooltest) \
+
+
+#define DECLARE(X) static int X(int, char *[]);
+APPS_X(DECLARE)
+#undef DECLARE
+
+static const struct app {
+        const char *name;
+        int (*fn)(int, char *[]);
+} app_list[] = {
+#define ELEM(X) { # X, X },
+        APPS_X(ELEM)
+#undef ELEM
+};
+
+static int echo(int argc, char *argv[]) {
+	for (int i = 1; i < argc; ++i) {
+		printf("%s%c", argv[i], i == argc - 1 ? '\n' : ' ');
+	}
+	return argc - 1;
 }
 
-int echo(int argc, char *argv[]) {
-    for (int i = 1; i < argc; ++i) {
-        printf("%s%c", argv[i], i == argc - 1 ? '\n' : ' ');
-    }
-    last_return = argc - 1;
-    return argc - 1;
+static int retcode(int argc, char *argv[]) {
+	printf("%d\n", g_retcode);
+	return 0;
 }
 
-int retcode(int argc, char *argv[]) {
-    printf("%d\n", last_return);
-    return 0;
+static int exec(int argc, char *argv[]) {
+	const struct app *app = NULL;
+	for (int i = 0; i < ARRAY_SIZE(app_list); ++i) {
+		if (!strcmp(argv[0], app_list[i].name)) {
+			app = &app_list[i];
+			break;
+		}
+	}
+
+	if (!app) {
+		printf("Unknown command\n");
+		return 1;
+	}
+
+	g_retcode = app->fn(argc, argv);
+	return g_retcode;
 }
 
-int splitCommand(char* command, int* length_of_array_with_args, char** array_with_args) {
-    size_t index_array_args = 0;
+static int pooltest(int argc, char *argv[]) {
+	struct obj {
+		void *field1;
+		void *field2;
+	};
+	static struct obj objmem[4];
+	static struct pool objpool = POOL_INITIALIZER_ARRAY(objmem);
 
-    char* token = strtok(command, POSSIBLE_SEPARATORS);
-    while(token != NULL) {
-        strcpy(array_with_args[index_array_args++], token);
-        token = strtok(NULL, POSSIBLE_SEPARATORS);
-    }
-
-    *length_of_array_with_args = index_array_args;
-    return 0;
+	if (!strcmp(argv[1], "alloc")) {
+		struct obj *o = pool_alloc(&objpool);
+		printf("alloc %ld\n", o ? (o - objmem) : -1);
+		return 0;
+	} else if (!strcmp(argv[1], "free")) {
+		int iobj = atoi(argv[2]);
+		printf("free %d\n", iobj);
+		pool_free(&objpool, objmem + iobj);
+		return 0;
+	}
+    return -1;
 }
 
-int commandExecutionProcess(int count_of_commands, char** arrayOfCommands) {
-    for (int i = 0; i < count_of_commands; ++i) {
-        char* command = arrayOfCommands[i];
+int shell(int argc, char *argv[]) {
+	char line[256];
+	while (fgets(line, sizeof(line), stdin)) {
+		const char *comsep = "\n;";
+		char *stcmd;
+		char *cmd = strtok_r(line, comsep, &stcmd);
+		while (cmd) {
+			const char *argsep = " ";
+			char *starg;
+			char *arg = strtok_r(cmd, argsep, &starg);
+			char *argv[256];
+			int argc = 0;
+			while (arg) {
+				argv[argc++] = arg;
+				arg = strtok_r(NULL, argsep, &starg);
+			}
+			argv[argc] = NULL;
 
-        int length_of_array_with_args = 0;
-        char** array_with_args = (char**)malloc(MAX_NUM_OF_ARGS * sizeof(char*));
-        for(int j = 0; j < MAX_NUM_OF_ARGS; ++j) {
-            array_with_args[j] = (char*) malloc(MAX_COMMAND_LENGTH * sizeof(char));
-        }
+			if (!argc) {
+				break;
+			}
 
-        if(splitCommand(command, &length_of_array_with_args, array_with_args)) {
-            exit(-1);
-        }
+			exec(argc, argv);
 
-        if (!strcmp(array_with_args[0], "echo")) {
-            echo(length_of_array_with_args, array_with_args);
-        } else if (!strcmp(array_with_args[0], "retcode")) {
-            retcode(length_of_array_with_args, array_with_args);
-        } else {
-            printf("Unknown command\n");
-            free_string_array(array_with_args, length_of_array_with_args);
-            return UNKNOWN_COMMAND;
-        }
-        free_string_array(array_with_args, length_of_array_with_args);
-
-    }
-    free_string_array(arrayOfCommands, count_of_commands);
-    return 0;
-}
-
-int commandLineProcess() {
-    char *commands = (char*) malloc(MAX_COMMAND_LENGTH * sizeof(char));
-    char** arrayOfCommands = (char**)malloc(MAX_NUM_OF_COMMANDS * sizeof(char*));
-    for(int i = 0; i < MAX_NUM_OF_COMMANDS; ++i) {
-        arrayOfCommands[i] = (char*) malloc(MAX_COMMAND_LENGTH * sizeof(char));
-    }
-    int length_of_array_commands = 0;
-
-    while(!feof(stdin)) {
-        fgets(commands, MAX_COMMAND_LENGTH, stdin);
-
-        char *token;
-        token = strtok(commands, SEPARATOR_FOR_THE_COMMANDS);
-
-        while(token != NULL) {
-            strcpy(arrayOfCommands[length_of_array_commands++], token);
-            token = strtok(NULL, SEPARATOR_FOR_THE_COMMANDS);
-        }
-    }
-    free(commands);
-
-    return commandExecutionProcess(length_of_array_commands, arrayOfCommands);
+			cmd = strtok_r(NULL, comsep, &stcmd);
+		}
+	}
+	return 0;
 }
 
 
 int main(int argc, char *argv[]) {
-    return commandLineProcess();
+	shell(0, NULL);
 }
