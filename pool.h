@@ -13,7 +13,7 @@ struct pool {
 };
 
 #define POOL_INITIALIZER(_mem, _nmemb, _membsz) (struct pool){ \
-    .mem = (_mem), .membsz = (_membsz), .freestart = (_mem), .freeend = (((void*)(_mem)) + ((_nmemb) * (_membsz))), \
+    .mem = (_mem), .membsz = (_membsz), .freestart = (_mem), .freeend = (((_mem)) + ((_nmemb) * (_membsz))), \
     .free = NULL \
 }
 
