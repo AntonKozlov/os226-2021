@@ -70,11 +70,15 @@ static int pooltest(int argc, char *argv[]) {
 		return 0;
 	} else if (!strcmp(argv[1], "free")) {
 		int iobj = atoi(argv[2]);
+        if (iobj == 0 && argv[2] != 0) {
+            fprintf(stderr, "%s is not a number\n", argv[2]);
+            return 0;
+        }
 		printf("free %d\n", iobj);
 		pool_free(&objpool, objmem + iobj);
 		return 0;
 	} else {
-        fprintf(stderr, "Unknown command %s", argv[1]);
+        fprintf(stderr, "Unknown parameter %s\n", argv[1]);
         return -1;
     }
 }

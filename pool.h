@@ -4,6 +4,7 @@
 
 struct pool {
     void *mem;
+    unsigned long nmemb;
     unsigned long membsz;
     void *freestart;
     void *freeend;
@@ -14,10 +15,11 @@ struct pool {
 
 #define POOL_INITIALIZER(_mem, _nmemb, _membsz) (struct pool) { \
     .mem = (_mem),                                              \
+    .nmemb = (_nmemb),                                          \
     .membsz = (_membsz),                                        \
     .freestart = (_mem),                                        \
-    .freeend = (char *)(_mem) + (_nmemb) * (_membsz),           \
-    .free = NULL                                                \
+    .freeend = (char *) (_mem) + (_nmemb) * (_membsz),          \
+    .free = NULL,                                               \
 }
 
 #define POOL_INITIALIZER_ARRAY(_array) \
