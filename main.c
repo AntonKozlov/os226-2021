@@ -1,13 +1,34 @@
 #include <stdio.h>
-/*#include <stdbool.h>
+#include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
-#include <stdlib.h>*/
-#include <string.h>
+
+#include "pool.h"
 
 #define MAX_COMMANDS 256
 #define MAX_LENGTH 256
 #define COMMAND_DELIM ";\n"
 #define WORD_DELIM " \n"
+
+
+#define APPS_X(X) \
+        X(echo) \
+        X(retcode) \
+        X(pooltest) \
+
+
+#define DECLARE(X) static int X(int, char *[]);
+APPS_X(DECLARE)
+#undef DECLARE
+
+static const struct app {
+    const char *name;
+    int (*fn)(int, char *[]);
+} app_list[] = {
+#define ELEM(X) { # X, X },
+        APPS_X(ELEM)
+#undef ELEM
+};
 
 int echo(int argc, char *argv[]) {
     for (int i = 1; i < argc; ++i) {
@@ -31,7 +52,7 @@ static int pooltest(int argc, char *argv[]) {
 
     if (!strcmp(argv[1], "alloc")) {
         struct obj *o = pool_alloc(&objpool);
-        printf("alloc %d\n", o ? (o - objmem) : -1);
+        printf("alloc %ld\n", o ? (o - objmem) : -1);
         return 0;
     } else if (!strcmp(argv[1], "free")) {
         int iobj = atoi(argv[2]);
@@ -65,7 +86,11 @@ int cmd() {
             }
             if (strcmp(words[0], "echo") == 0) {
                 return_code = echo(count_of_words, words);
-            } else if (strcmp(words[0], "retcode") == 0) {
+            } else if (strcmp(words[0], "pooltest") == 0) {
+                return_code = pooltest(count_of_words, words);
+            }
+
+            else if (strcmp(words[0], "retcode") == 0) {
                 char * argv[128];
                 char buffer[MAX_LENGTH];
                 sprintf(buffer, "%d", return_code);
