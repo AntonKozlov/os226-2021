@@ -1,76 +1,113 @@
 
-#include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
-#include <unistd.h>
+#include <stdio.h>
 
-int returned;
+#include "pool.h"
 
-int echo(int argc, char *argv[]) {
-    for (int i = 1; i < argc; ++i) {
-        printf("%s%c", argv[i], i == argc - 1 ? '\n' : ' ');
-    }
-    return argc - 1;
+static int g_retcode;
+
+#define APPS_X(X) \
+        X(echo) \
+        X(retcode) \
+        X(pooltest) \
+
+
+#define DECLARE(X) static int X(int, char *[]);
+APPS_X(DECLARE)
+#undef DECLARE
+
+static const struct app {
+        const char *name;
+        int (*fn)(int, char *[]);
+} app_list[] = {
+#define ELEM(X) { # X, X },
+        APPS_X(ELEM)
+#undef ELEM
+};
+
+static int echo(int argc, char *argv[]) {
+	for (int i = 1; i < argc; ++i) {
+		printf("%s%c", argv[i], i == argc - 1 ? '\n' : ' ');
+	}
+	return argc - 1;
 }
 
-int retcode(int argc, char *argv[]) {
-    printf("%d\n", returned);
-    return 0;
-}
-int function_call(int count_words, char **words){
-    if (!strcmp(words[0], "echo")) {
-        return echo(count_words, words);
-    } else
-    if(!strcmp(words[0], "retcode")){
-        return retcode(count_words,words)  ;
-    }
-    return returned;
+static int retcode(int argc, char *argv[]) {
+	printf("%d\n", g_retcode);
+	return 0;
 }
 
-char *get_string(int *len) {
+static int exec(int argc, char *argv[]) {
+	const struct app *app = NULL;
+	for (int i = 0; i < ARRAY_SIZE(app_list); ++i) {
+		if (!strcmp(argv[0], app_list[i].name)) {
+			app = &app_list[i];
+			break;
+		}
+	}
 
-    *len = 0;
-    int capacity = 1;
-    char *s = (char*) malloc(sizeof(char));
-    char c = (char)getchar();
-    if ( c != '\n' ) {
-    }
-    while (c != '\n' && c != ';' && c!=EOF) {
-        s[(*len)++] = c;
-        if (*len >= capacity) {
-            capacity *= 2;
-            s = (char*) realloc(s, capacity * sizeof(char));
-        }
-        c = (char)getchar();
-    }
-    s[*len] = '\0';
-    return s;
+	if (!app) {
+		printf("Unknown command\n");
+		return 1;
+	}
+
+	g_retcode = app->fn(argc, argv);
+	return g_retcode;
 }
-int parsing (){
-    while (1){
-        int len;
-        char *str = get_string(&len);
-        int count_words = 0;
-        char *buf = strtok(str, " ");
-        char **words = NULL;
-        while (buf!=NULL){
-            words = realloc(words,(count_words+1)*sizeof (char*));
-            words[count_words] = buf;
-            count_words++;
-            buf = strtok(NULL, " ");
-        }
-        if (words!=NULL) {
-            returned = function_call(count_words, words);
-            free(words);
-        }
-        free(str);
-        if (feof(stdin))
-            return 0;
-    }
+
+static int pooltest(int argc, char *argv[]) {
+	struct obj {
+		void *field1;
+		void *field2;
+	};
+	static struct obj objmem[4];
+	static struct pool objpool = POOL_INITIALIZER_ARRAY(objmem);
+
+	if (!strcmp(argv[1], "alloc")) {
+		struct obj *o = pool_alloc(&objpool);
+		printf("alloc %d\n", o ? (o - objmem) : -1);
+		return 0;
+	} else if (!strcmp(argv[1], "free")) {
+		int iobj = atoi(argv[2]);
+		printf("free %d\n", iobj);
+		pool_free(&objpool, objmem + iobj);
+		return 0;
+	}
 }
+
+int shell(int argc, char *argv[]) {
+	char line[256];
+	while (fgets(line, sizeof(line), stdin)) {
+		const char *comsep = "\n;";
+		char *stcmd;
+		char *cmd = strtok_r(line, comsep, &stcmd);
+		while (cmd) {
+			const char *argsep = " ";
+			char *starg;
+			char *arg = strtok_r(cmd, argsep, &starg);
+			char *argv[256];
+			int argc = 0;
+			while (arg) {
+				argv[argc++] = arg;
+				arg = strtok_r(NULL, argsep, &starg);
+			}
+			argv[argc] = NULL;
+
+			if (!argc) {
+				break;
+			}
+
+			exec(argc, argv);
+
+			cmd = strtok_r(NULL, comsep, &stcmd);
+		}
+	}
+	return 0;
+}
+
 
 int main(int argc, char *argv[]) {
-    int check = 0;
-    parsing();
-    return 0;
+	shell(0, NULL);
 }
