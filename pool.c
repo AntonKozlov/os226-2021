@@ -18,7 +18,7 @@ void *pool_alloc(struct pool *p) {
         p->freestart += p->membsz;
         return r;
     }
-	return NULL;
+  return NULL;
 }
 
 void pool_free(struct pool *p, void *ptr) {
