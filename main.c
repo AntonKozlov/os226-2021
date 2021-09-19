@@ -67,7 +67,7 @@ static int pooltest(int argc, char *argv[]) {
 
 	if (!strcmp(argv[1], "alloc")) {
 		struct obj *o = pool_alloc(&objpool);
-		printf("alloc %d\n", o ? (o - objmem) : -1);
+		printf("alloc %ld\n", o ? (o - objmem) : -1);
 		return 0;
 	} else if (!strcmp(argv[1], "free")) {
 		int iobj = atoi(argv[2]);
@@ -75,6 +75,7 @@ static int pooltest(int argc, char *argv[]) {
 		pool_free(&objpool, objmem + iobj);
 		return 0;
 	}
+    return 0;
 }
 
 int shell(int argc, char *argv[]) {
