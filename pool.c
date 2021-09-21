@@ -22,7 +22,7 @@ void *pool_alloc(struct pool *p) {
 }
 
 void pool_free(struct pool *p, void *ptr) {
-    if(ptr >= p->mem && ptr <= p->freeend) {
+    if(ptr >= p->mem && ptr < p->freeend) {
         struct pool_free_block *fb = ptr;
         *fb = (struct pool_free_block) {.next = p->free};
         p->free = fb;
