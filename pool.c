@@ -4,33 +4,31 @@
 #include "pool.h"
 
 void pool_init(struct pool *p, void *mem, unsigned long nmemb, unsigned long membsz) {
-    *p = POOL_INITIALIZER(mem, nmemb, membsz);
+	p->mem = mem;
+	p->membsz = membsz;
+	p->freestart = mem;
+	p->freeend = p->freestart + nmemb * membsz;
+	p->freehead = NULL;
 }
 
 void *pool_alloc(struct pool *p) {
-    struct pool_free_block *fb = p->free;
-    if (fb) {
-        p->free = fb->next;
-        return fb;
-    }
-    if (p->freestart < p->freeend) {
-        void *r = p->freestart;
-        p->freestart += p->membsz;
-        return r;
-    }
-    return NULL;
-}
+	if (p->freestart < p->freeend) {
+		void *r = p->freestart;
+		p->freestart += p->membsz;
+		return r;
+	}
 
-int belong_pool(struct pool *p, void *ptr) {
-    return (p->mem <= ptr) && (p->freeend >= ptr);
+	struct pool_free_block *fb = p->freehead;
+	if (fb) {
+		p->freehead = fb->next;
+		return fb;
+	}
+
+	return NULL;
 }
 
 void pool_free(struct pool *p, void *ptr) {
-    if (belong_pool(p, ptr)) {
-        struct pool_free_block *free_block = ptr;
-        *free_block = (struct pool_free_block) {
-            .next = p->free
-        };
-        p->free = free_block;
-    }
+	struct pool_free_block *fb = ptr;
+	fb->next = p->freehead;
+	p->freehead = fb;
 }
