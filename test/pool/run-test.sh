@@ -1,2 +1,1 @@
-
 map_inputs checkfn
