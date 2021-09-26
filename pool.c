@@ -1,5 +1,4 @@
 #include <stddef.h>
-#include <stdio.h>
 
 #include "pool.h"
 
@@ -8,23 +7,21 @@ void pool_init(struct pool* p, void* mem, unsigned long nmemb, unsigned long mem
 }
 
 void* pool_alloc(struct pool* p) {
-    if (p->next == p->end) {
-        fprintf(stderr, "Allocation failed: pool %p is full\n", p->base);
-        return NULL;
+    struct pool_free_block* fb = p->freehead;
+    if (fb) {
+        p->freehead = fb->next;
+        return fb;
+    } else if (p->freestart < p->freeend) {
+        void* r = p->freestart;
+        p->freestart += p->membsz;
+        return r;
     }
 
-    void* r = p->next;
-    p->next += p->size;
-    return r;
+    return NULL;
 }
 
 void pool_free(struct pool* p, void* ptr) {
-    if (ptr < p->base || ptr >= p->next || (ptr - p->base) % p->size != 0) {
-        fprintf(stderr, "Freeing failed: %p is not from pool %p\n", ptr, p->base);
-        return;
-    }
-
-    while (p->next != ptr) {
-        p->next -= p->size;
-    }
+    struct pool_free_block* fb = ptr;
+    fb->next = p->freehead;
+    p->freehead = fb;
 }
