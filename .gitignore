@@ -7,3 +7,4 @@
 # IDE and tooling
 /tags
 /.vagrant
+.idea/
