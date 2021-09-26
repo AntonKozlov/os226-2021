@@ -16,6 +16,7 @@ jobs:
         test:
           - batch
           - pool
+          - syscall
 
     steps:
     - uses: actions/checkout@v2

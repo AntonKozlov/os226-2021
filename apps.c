@@ -1,8 +1,11 @@
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <stdbool.h>
+#include <stdarg.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 
+#include "usyscall.h"
 #include "pool.h"
 
 #define MAX_INPUT_STRING_LENGTH 1024
@@ -19,23 +22,11 @@ static int return_code = OK;
 
 //---------------------------------------------------------------------------------------------------------------- APPS
 
-/* --------------- After preprocessing... ----------
- *
- * static int echo(int, char *[]); ...
- *
- * static const struct app {
- *      const char *name;
- *      int (*fn)(int, char *[]);
- * } app_list[] = {
- *      { "echo", echo }, ...
- * };
- * -------------------------------------------------
-*/
-
-#define APPS_X(X)           \
-        X(echo)             \
-        X(retcode)          \
-        X(pooltest)
+#define APPS_X(X) \
+        X(echo) \
+        X(retcode) \
+        X(pooltest) \
+        X(syscalltest) \
 
 #define DECLARE(X) static int X(int, char *[]);
 
@@ -66,6 +57,7 @@ int echo(int argc, char* argv[]) {
         if (printf("%s%c", argv[i], i == argc - 1 ? '\n' : ' ') < 0)
             return ERROR;
     }
+    fflush(stdout);
     return argc - 1;
 }
 
@@ -73,6 +65,15 @@ int retcode(int argc, char* argv[]) {
     if (printf("%d\n", return_code) < 0)
         return ERROR;
     else return OK;
+}
+
+static int os_printf(const char *fmt, ...) {
+	char buf[128];
+	va_list ap;
+	va_start(ap, fmt);
+	int ret = vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	return os_print(buf, ret);
 }
 
 int exec_commands(const int token_num, char** tokens) {
@@ -95,7 +96,6 @@ int exec_commands(const int token_num, char** tokens) {
     return_code = app->fn(token_num, tokens);
     return OK;
 }
-
 int parse_with_delim(char* buf, char*** container, int* container_size, const char* delim) {
     *container = NULL;
     *container_size = 0;
@@ -110,7 +110,7 @@ int parse_with_delim(char* buf, char*** container, int* container_size, const ch
     return OK;
 }
 
-//---------------------------------------------------------------------------------------------------------------- POOL
+//--------------------------------------------------------------------------------------------------------------- TESTS
 
 static int pooltest(int argc, char* argv[]) {
     struct obj{
@@ -133,9 +133,14 @@ static int pooltest(int argc, char* argv[]) {
     return OK;
 }
 
+static int syscalltest(int argc, char *argv[]) {
+    int r = os_printf("%s\n", argv[1]);
+    return r - 1;
+}
+
 //---------------------------------------------------------------------------------------------------------------- MAIN
 
-int main(int argc, char* argv[]) {
+int shell(int argc, char* argv[]) {
     char buf[MAX_INPUT_STRING_LENGTH];
     while (fgets(buf, MAX_INPUT_STRING_LENGTH, stdin) != NULL) {
         char** commands;
