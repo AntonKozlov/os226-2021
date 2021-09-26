@@ -64,7 +64,8 @@ int echo(int argc, char* argv[]) {
 int retcode(int argc, char* argv[]) {
     if (printf("%d\n", return_code) < 0)
         return ERROR;
-    else return OK;
+    fflush(stdout);
+    return OK;
 }
 
 static int os_printf(const char *fmt, ...) {
