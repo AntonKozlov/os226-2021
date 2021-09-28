@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="BranchesTreeState">
+    <expand>
+      <path>
+        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="LOCAL_ROOT" type="e8cecc67:BranchNodeDescriptor" />
+      </path>
+      <path>
+        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="REMOTE_ROOT" type="e8cecc67:BranchNodeDescriptor" />
+      </path>
+      <path>
+        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="REMOTE_ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="GROUP_NODE:origin" type="e8cecc67:BranchNodeDescriptor" />
+      </path>
+      <path>
+        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="REMOTE_ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="GROUP_NODE:upstream" type="e8cecc67:BranchNodeDescriptor" />
+      </path>
+    </expand>
+    <select>
+      <path>
+        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="REMOTE_ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="GROUP_NODE:upstream" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="BRANCH:upstream/master" type="e8cecc67:BranchNodeDescriptor" />
+      </path>
+    </select>
+  </component>
+  <component name="CMakeRunConfigurationManager" shouldGenerate="true" shouldDeleteObsolete="true">
+    <generated />
+  </component>
+  <component name="CMakeSettings">
+    <configurations>
+      <configuration PROFILE_NAME="Debug" CONFIG_NAME="Debug" />
+    </configurations>
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="88d92ec2-6c5c-4cd1-90dc-dc5279136732" name="Default Changelist" comment="Fix string compare for functions">
+      <change beforePath="$PROJECT_DIR$/apps.c" beforeDir="false" afterPath="$PROJECT_DIR$/apps.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/kernel.c" beforeDir="false" afterPath="$PROJECT_DIR$/kernel.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/syscall.c" beforeDir="false" afterPath="$PROJECT_DIR$/syscall.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/batch/1.in" beforeDir="false" afterPath="$PROJECT_DIR$/test/batch/1.in" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/pool/1.fn" beforeDir="false" afterPath="$PROJECT_DIR$/test/pool/1.fn" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/pool/1.in" beforeDir="false" afterPath="$PROJECT_DIR$/test/pool/1.in" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/pool/run-test.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/pool/run-test.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/syscall/1.in" beforeDir="false" afterPath="$PROJECT_DIR$/test/syscall/1.in" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/syscall/1.out" beforeDir="false" afterPath="$PROJECT_DIR$/test/syscall/1.out" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/syscall/run-test.sh" beforeDir="false" afterPath="$PROJECT_DIR$/test/syscall/run-test.sh" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ClangdSettings">
+    <option name="clangTidyViaClangd" value="false" />
+    <option name="formatViaClangd" value="false" />
+    <option name="clangWarnings" value="-Wno-unused-variable,-Wno-infinite-recursion,-Werror=implicit-function-declaration,-Wshadow,-Wno-shadow-field-in-constructor-modified,-Wno-shadow-ivar,-Wuninitialized,-Wunused-label,-Wunused-lambda-capture,-Wno-deprecated-declarations" />
+  </component>
+  <component name="ExternalProjectsData">
+    <projectState path="$PROJECT_DIR$">
+      <ProjectState />
+    </projectState>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="master" />
+      </map>
+    </option>
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="MakefileLocalSettings">
+    <option name="availableProjects">
+      <map>
+        <entry>
+          <key>
+            <ExternalProjectPojo>
+              <option name="name" value="os226-2021" />
+              <option name="path" value="$PROJECT_DIR$" />
+            </ExternalProjectPojo>
+          </key>
+          <value>
+            <list>
+              <ExternalProjectPojo>
+                <option name="name" value="os226-2021" />
+                <option name="path" value="C:\Users\slava\Documents\GitHub\os226-2021" />
+              </ExternalProjectPojo>
+            </list>
+          </value>
+        </entry>
+      </map>
+    </option>
+    <option name="projectSyncType">
+      <map>
+        <entry key="$PROJECT_DIR$" value="RE_IMPORT" />
+      </map>
+    </option>
+  </component>
+  <component name="ProjectId" id="1xwgpBIeDxL97zjSAQqadHPAPXM" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">
+    <property name="RunOnceActivity.OpenProjectViewOnStart" value="true" />
+    <property name="WebServerToolWindowFactoryState" value="true" />
+    <property name="cf.first.check.clang-format" value="false" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$" />
+    <property name="nodejs_package_manager_path" value="npm" />
+    <property name="settings.editor.selected.configurable" value="preferences.sourceCode.SQLite" />
+  </component>
+  <component name="RunManager">
+    <configuration default="true" type="GradleAppRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" PASS_PARENT_ENVS_2="true">
+      <method v="2">
+        <option name="com.jetbrains.cidr.cpp.gradle.execution.GradleNativeBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="all" type="MAKEFILE_TARGET_RUN_CONFIGURATION" factoryName="Makefile" temporary="true">
+      <makefile filename="$PROJECT_DIR$/Makefile" target="all" workingDirectory="" arguments="">
+        <envs />
+      </makefile>
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Makefile.all" />
+        <item itemvalue="Makefile.all" />
+        <item itemvalue="Makefile.all" />
+        <item itemvalue="Makefile.all" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="88d92ec2-6c5c-4cd1-90dc-dc5279136732" name="Default Changelist" comment="" />
+      <created>1631271745747</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1631271745747</updated>
+      <workItem from="1631271747369" duration="1392000" />
+      <workItem from="1631378317670" duration="13069000" />
+      <workItem from="1631451292729" duration="10128000" />
+      <workItem from="1631477425172" duration="1645000" />
+      <workItem from="1631715901976" duration="1476000" />
+      <workItem from="1631974652974" duration="3338000" />
+      <workItem from="1632063972133" duration="14179000" />
+      <workItem from="1632087244615" duration="286000" />
+      <workItem from="1632254316408" duration="20000" />
+      <workItem from="1632661772816" duration="14413000" />
+      <workItem from="1632847074536" duration="3964000" />
+    </task>
+    <task id="LOCAL-00001" summary="Сommand handler has been written">
+      <created>1631460196069</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1631460196069</updated>
+    </task>
+    <task id="LOCAL-00002" summary="Fix string compare for functions">
+      <created>1631716018250</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1631716018250</updated>
+    </task>
+    <task id="LOCAL-00003" summary="HW2">
+      <created>1632079922115</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1632079922115</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="upstream/master" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
+          </value>
+        </entry>
+      </map>
+    </option>
+    <option name="oldMeFiltersMigrated" value="true" />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="Сommand handler has been written" />
+    <MESSAGE value="Fix string compare for functions" />
+    <MESSAGE value="HW2" />
+    <option name="LAST_COMMIT_MESSAGE" value="HW2" />
+  </component>
+  <component name="WindowStateProjectService">
+    <state x="395" y="91" width="929" height="642" key="#Inspections" timestamp="1631455516852">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="395" y="91" width="929" height="642" key="#Inspections/0.0.1536.824@0.0.1536.824" timestamp="1631455516852" />
+    <state x="539" y="214" key="#com.intellij.fileTypes.FileTypeChooser" timestamp="1632662185543">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="539" y="214" key="#com.intellij.fileTypes.FileTypeChooser/0.0.1536.824@0.0.1536.824" timestamp="1632662185543" />
+    <state x="115" y="162" key="#com.intellij.refactoring.safeDelete.UnsafeUsagesDialog" timestamp="1632074942056">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="115" y="162" key="#com.intellij.refactoring.safeDelete.UnsafeUsagesDialog/0.0.1536.824@0.0.1536.824" timestamp="1632074942056" />
+    <state x="164" y="0" key="CommitChangelistDialog2" timestamp="1632662239755">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="164" y="0" key="CommitChangelistDialog2/0.0.1536.824@0.0.1536.824" timestamp="1632662239755" />
+    <state x="147" y="65" key="DiffContextDialog" timestamp="1632662237936">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="147" y="65" key="DiffContextDialog/0.0.1536.824@0.0.1536.824" timestamp="1632662237936" />
+    <state x="548" y="153" key="FileChooserDialogImpl" timestamp="1631271818303">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="548" y="153" key="FileChooserDialogImpl/0.0.1536.824@0.0.1536.824" timestamp="1631271818303" />
+    <state x="147" y="65" key="MergeDialog" timestamp="1632854193534">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="147" y="65" key="MergeDialog/0.0.1536.824@0.0.1536.824" timestamp="1632854193534" />
+    <state x="407" y="174" key="MultipleFileMergeDialog" timestamp="1632854589259">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="407" y="174" key="MultipleFileMergeDialog/0.0.1536.824@0.0.1536.824" timestamp="1632854589259" />
+    <state x="81" y="92" key="SettingsEditor" timestamp="1631379066548">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="81" y="92" key="SettingsEditor/0.0.1536.824@0.0.1536.824" timestamp="1631379066548" />
+    <state x="282" y="230" key="Vcs.Push.Dialog.v2" timestamp="1632079987560">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="282" y="230" key="Vcs.Push.Dialog.v2/0.0.1536.824@0.0.1536.824" timestamp="1632079987560" />
+    <state x="586" y="326" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2" timestamp="1632661856248">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="586" y="326" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/0.0.1536.824@0.0.1536.824" timestamp="1632661856248" />
+    <state x="-6" y="0" width="781" height="830" key="dock-window-1" timestamp="1632692792715">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="-6" y="0" width="781" height="830" key="dock-window-1/0.0.1536.824@0.0.1536.824" timestamp="1632692792715" />
+    <state x="934" y="128" key="git4idea.branch.GitSmartOperationDialog" timestamp="1632854275534">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="934" y="128" key="git4idea.branch.GitSmartOperationDialog/0.0.1536.824@0.0.1536.824" timestamp="1632854275534" />
+    <state x="325" y="316" width="886" height="207" key="makefile.clean.confirm.dialog" timestamp="1632854595236">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="325" y="316" width="886" height="207" key="makefile.clean.confirm.dialog/0.0.1536.824@0.0.1536.824" timestamp="1632854595236" />
+    <state x="809" y="190" key="run.anything.popup" timestamp="1632852390422">
+      <screen x="0" y="0" width="1536" height="824" />
+    </state>
+    <state x="809" y="190" key="run.anything.popup/0.0.1536.824@0.0.1536.824" timestamp="1632852390422" />
+  </component>
+</project>

@@ -6,3 +6,4 @@ echo test2   ;
 retcode
 
 echo test3;echo test4    test5;;;retcode
+
