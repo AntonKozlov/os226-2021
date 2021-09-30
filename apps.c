@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "sched.h"
 #include "usyscall.h"
 #include "pool.h"
 
@@ -15,6 +16,8 @@ static int g_retcode;
         X(retcode) \
         X(pooltest) \
         X(syscalltest) \
+        X(coapp) \
+        X(cosched) \
 
 #define DECLARE(X) static int X(int, char *[]);
 APPS_X(DECLARE)
@@ -50,6 +53,51 @@ static int retcode(int argc, char *argv[]) {
 	printf("%d\n", g_retcode);
 	fflush(stdout);
 	return 0;
+}
+
+struct coapp_ctx {
+        int cnt;
+} ctxarray[16];
+struct pool ctxpool = POOL_INITIALIZER_ARRAY(ctxarray);
+
+static void coapp_task(void *_ctx) {
+        struct coapp_ctx *ctx = _ctx;
+
+        printf("%16s id %d cnt %d\n", __func__, 1 + ctx - ctxarray, ctx->cnt);
+
+        if (0 < ctx->cnt) {
+                sched_cont(coapp_task, ctx, 2);
+        }
+
+        --ctx->cnt;
+}
+
+static void coapp_rt(void *_ctx) {
+        struct coapp_ctx *ctx = _ctx;
+
+        printf("%16s id %d cnt %d\n", __func__, 1 + ctx - ctxarray, ctx->cnt);
+
+        sched_time_elapsed(1);
+
+        if (0 < ctx->cnt) {
+                sched_cont(coapp_rt, ctx, 0);
+        }
+
+        --ctx->cnt;
+}
+
+static int coapp(int argc, char* argv[]) {
+        int entry_id = atoi(argv[1]) - 1;
+
+        struct coapp_ctx *ctx = pool_alloc(&ctxpool);
+        ctx->cnt = atoi(argv[2]);
+
+        void (*entries[])(void*) = { coapp_task, coapp_rt };
+        sched_new(entries[entry_id], ctx, atoi(argv[3]), atoi(argv[4]));
+}
+
+static int cosched(int argc, char* argv[]) {
+        sched_run(atoi(argv[1]));
 }
 
 static int exec(int argc, char *argv[]) {
@@ -103,12 +151,12 @@ int shell(int argc, char *argv[]) {
 		char *stcmd;
 		char *cmd = strtok_r(line, comsep, &stcmd);
 		while (cmd) {
-			const char *argsep = " ";
+			const char *argsep = " \t";
 			char *starg;
 			char *arg = strtok_r(cmd, argsep, &starg);
 			char *argv[256];
 			int argc = 0;
-			while (arg) {
+			while (arg && arg[0] != '#') {
 				argv[argc++] = arg;
 				arg = strtok_r(NULL, argsep, &starg);
 			}

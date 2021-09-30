@@ -16,6 +16,7 @@ jobs:
           - batch
           - pool
           - syscall
+          - cosched
 
     steps:
     - uses: actions/checkout@v2
