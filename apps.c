@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdarg.h>
 
+#include "sched.h"
 #include "usyscall.h"
 #include "pool.h"
 
@@ -10,7 +11,8 @@
 
 #define MAX_INPUT_LINE_LEN 1024
 #define COMMAND_DELIM ";\n"
-#define TOKEN_DELIM " "
+#define TOKEN_DELIM " \t"
+#define COMMENT_SIGN '#'
 
 // GLOBALS
 
@@ -20,6 +22,12 @@ enum RETURN_CODES {
 
 int last_return_code = OK;
 
+struct coapp_ctx {
+    int cnt;
+} ctxarray[16];
+
+struct pool ctxpool = POOL_INITIALIZER_ARRAY(ctxarray);
+
 // APPLICATION DECLARATIONS
 
 #define APPS_X(X) \
@@ -27,6 +35,8 @@ int last_return_code = OK;
         X(retcode) \
         X(pooltest)\
         X(syscalltest) \
+        X(coapp) \
+        X(cosched) \
 
 #define DECLARE(X) static int X(int, char* []);
 
@@ -97,6 +107,49 @@ static int syscalltest(int argc, char* argv[]) {
     return r - 1;
 }
 
+static void coapp_task(void* _ctx) {
+    struct coapp_ctx* ctx = _ctx;
+
+    printf("%16s id %ld cnt %d\n", __func__, 1 + ctx - ctxarray, ctx->cnt);
+
+    if (0 < ctx->cnt) {
+        sched_cont(coapp_task, ctx, 2);
+    }
+
+    --ctx->cnt;
+}
+
+static void coapp_rt(void* _ctx) {
+    struct coapp_ctx* ctx = _ctx;
+
+    printf("%16s id %ld cnt %d\n", __func__, 1 + ctx - ctxarray, ctx->cnt);
+
+    sched_time_elapsed(1);
+
+    if (0 < ctx->cnt) {
+        sched_cont(coapp_rt, ctx, 0);
+    }
+
+    --ctx->cnt;
+}
+
+static int coapp(int argc, char* argv[]) {
+    int entry_id = (int) strtol(argv[1], NULL, 10) - 1;
+
+    struct coapp_ctx* ctx = pool_alloc(&ctxpool);
+    ctx->cnt = (int) strtol(argv[2], NULL, 10);
+
+    void (* entries[])(void*) = {coapp_task, coapp_rt};
+    sched_new(entries[entry_id], ctx, (int) strtol(argv[3], NULL, 10), (int) strtol(argv[4], NULL, 10));
+
+    return OK;
+}
+
+static int cosched(int argc, char* argv[]) {
+    sched_run(strtol(argv[1], NULL, 10));
+    return OK;
+}
+
 // HELPER FUNCTIONS
 
 int divide_str(char* source, char* delim, char*** container, int* container_size) {
@@ -104,7 +157,7 @@ int divide_str(char* source, char* delim, char*** container, int* container_size
     *container_size = 0;
 
     char* token = strtok(source, delim);
-    while (token != NULL) {
+    while (token != NULL && token[0] != COMMENT_SIGN) {
         *container = realloc(*container, ++(*container_size) * sizeof(char*));
         if (*container == NULL) {
             fprintf(stderr, "String division failed at token %d\n", *container_size);
