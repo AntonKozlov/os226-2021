@@ -105,7 +105,7 @@ int parse_with_delim(char *buf, char ***container, int *container_size, const ch
     *container = NULL;
     *container_size = 0;
     char *cmd = strtok(buf, delim);
-    while (cmd) {
+    while (cmd && cmd[0] != '#') {
         *container = realloc(*container, sizeof(char *) * ++(*container_size));
         if (!*container)
             return ERROR;
@@ -202,8 +202,6 @@ int shell(int argc, char *argv[]) {
             free(commands);
             return ERROR;
         }
-        if ((int) (commands && commands[0]) != '#')
-            continue;
         for (int i = 0; i < command_num; i++) {
             char **tokens;
             int token_num;
@@ -219,33 +217,3 @@ int shell(int argc, char *argv[]) {
     }
     return OK;
 }
-/*
-    int shell(int argc, char *argv[]) {
-        char line[256];
-        while (fgets(line, sizeof(line), stdin)) {
-            const char *comsep = "\n;";
-            char *stcmd;
-            char *cmd = strtok_r(line, comsep, &stcmd);
-            while (cmd) {
-                const char *argsep = " \t";
-                char *starg;
-                char *arg = strtok_r(cmd, argsep, &starg);
-                char *argv[256];
-                int argc = 0;
-                while (arg && arg[0] != '#') {
-                    argv[argc++] = arg;
-                    arg = strtok_r(NULL, argsep, &starg);
-                }
-                argv[argc] = NULL;
-
-                if (!argc) {
-                    break;
-                }
-
-                exec(argc, argv);
-
-                cmd = strtok_r(NULL, comsep, &stcmd);
-            }
-        }
-        return 0;
-    }*/
