@@ -29,16 +29,16 @@ static void sighnd(int sig, siginfo_t *info, void *ctx) {
 }
 
 int main(int argc, char *argv[]) {
-	struct sigaction act = {
-		.sa_sigaction = sighnd,
-		.sa_flags = SA_RESTART,
-	};
-	sigemptyset(&act.sa_mask);
+    struct sigaction act = {
+            .sa_sigaction = sighnd,
+            .sa_flags = SA_RESTART,
+    };
+    sigemptyset(&act.sa_mask);
 
-	if (-1 == sigaction(SIGSEGV, &act, NULL)) {
-		perror("signal set failed");
-		return 1;
-	}
+    if (-1 == sigaction(SIGSEGV, &act, NULL)) {
+        perror("signal set failed");
+        return 1;
+    }
 
-	shell(0, NULL);
+    shell(0, NULL);
 }

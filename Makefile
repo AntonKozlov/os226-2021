@@ -9,5 +9,8 @@ test : main
 	$ ./test/run.sh
 	echo $$?
 
+try : main
+	$ ./main
+
 clean :
 	$(RM) *.o main

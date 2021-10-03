@@ -64,5 +64,5 @@ unsigned long syscall_do(int sysnum,
 }
 
 static int sys_print(char *str, int len) {
-	return write(1, str, len);
+	return (int) write(1, str, len);
 }
