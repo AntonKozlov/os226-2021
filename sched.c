@@ -58,17 +58,13 @@ void add_task(void (*entrypoint)(void *),
 void delete_task() {
     if (current == NULL) return;
 
-    struct task *prev;
     if (current == task_list.first) {
-        prev = task_list.first;
+        task_list.first = current->next;
     } else {
-        prev = task_list.first;
-        while (prev->next != current)
-            prev = prev->next;
+        struct task *prev;
+        for (prev = task_list.first; prev->next != current; prev = prev->next);
+        prev->next = current->next;
     }
-    prev->next = current->next;
-    pool_free(&task_pool, current);
-    current = NULL;
 }
 
 void sched_new(void (*entrypoint)(void *),
@@ -99,10 +95,8 @@ void sched_run(enum policy policy) {
 void run_tasks(struct task *(*policy)(struct task *, struct task *)) {
     while (task_list.first != NULL) {
         struct task *chosen_task = task_list.first, *next_task = chosen_task->next;
-        while (next_task != NULL) {
+        for (; next_task != NULL; next_task = next_task->next)
             chosen_task = policy(chosen_task, next_task);
-            next_task = next_task->next;
-        }
         if (chosen_task->timeout > time) {
             sched_time_elapsed(1);
             continue;
@@ -110,17 +104,7 @@ void run_tasks(struct task *(*policy)(struct task *, struct task *)) {
         current = chosen_task;
         current->entrypoint(current->aspace);
 
-
-
-        if (current == task_list.first) {
-            task_list.first = current->next;
-        } else {
-            struct task *prev;
-            prev = task_list.first;
-            while (prev->next != current)
-                prev = prev->next;
-            prev->next = current->next;
-        }
+        delete_task();
 
         pool_free(&task_pool, current);
         current = NULL;
@@ -140,5 +124,6 @@ struct task *policy_prio(struct task *chosen_task, struct task *next_task) {
 struct task *policy_deadline(struct task *chosen_task, struct task *next_task) {
     return next_task->timeout <= time &&
            ((0 < next_task->deadline && (next_task->deadline < chosen_task->deadline || chosen_task->deadline <= 0)) ||
-            (next_task->deadline == chosen_task->deadline && next_task->priority >= chosen_task->priority)) ? next_task : chosen_task;
+            (next_task->deadline == chosen_task->deadline && next_task->priority >= chosen_task->priority)) ? next_task
+                                                                                                            : chosen_task;
 }
