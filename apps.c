@@ -157,10 +157,12 @@ static int coapp(int argc, char *argv[]) {
 
     void (*entries[])(void *) = {coapp_task, coapp_rt};
     sched_new(entries[entry_id], ctx, (int) strtol(argv[3], NULL, 10), (int) strtol(argv[4], NULL, 10));
+    return OK;
 }
 
 static int cosched(int argc, char *argv[]) {
     sched_run((int) strtol(argv[1], NULL, 10));
+    return OK;
 }
 
 //--------------------------------------------------------------------------------------------------------------- TESTS
