@@ -1,4 +1,4 @@
-# 	entryid	cnt	prio	deadline
+# 	entryid	cnt	prio	check_deadline
 coapp	2	2	0	-1
 coapp	2	2	0	2
 coapp	2	2	0	-1
