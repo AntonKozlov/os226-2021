@@ -221,6 +221,27 @@ void sched_cont(void (*entrypoint)(void *aspace),
 void sched_time_elapsed(unsigned amount)
 {
 	time += amount;
+	struct task* tmp = wait_list;
+	if(wait_list)
+	{
+		for(;;)
+		{
+			if(tmp->time <= time)
+			{
+				insert_run_pool(tmp);
+				struct task* tmp2 = wait_list;
+				while(tmp2->next_wait)
+				{
+					if(tmp2->next_wait == tmp) break;
+					tmp2 = tmp2->next_wait;
+				}
+				if(tmp2 == tmp) wait_list = NULL;
+				else tmp2->next_wait = tmp->next_wait;
+			}
+			if(!tmp->next_wait) break;
+			tmp = tmp->next_wait;
+		}
+	}
 }
 
 void sched_start(void)
