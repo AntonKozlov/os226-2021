@@ -15,7 +15,7 @@ struct s_tasks {
     int deadline;
     int time_border;
     struct s_tasks* next_t;
-} tasks_arr[8];
+} tasks_arr[16];
 struct pool tasks_pool = POOL_INITIALIZER_ARRAY(tasks_arr);
 struct s_tasks *head = NULL;
 struct s_tasks *now_task = NULL;
@@ -25,7 +25,7 @@ void new_task (void (*entrypoint)(void *aspace),
                int priority,
                int deadline,
                int time_border){
-    struct s_tasks *task = pool_alloc(&tasks_arr);
+    struct s_tasks *task = pool_alloc(&tasks_pool);
     task->entrypoint = entrypoint;
     task->aspace = aspace;
     task->prio = priority;
@@ -62,13 +62,14 @@ void run (int (*cmp)(struct s_tasks* t1, struct s_tasks* t2)){
             if ((ch_task == NULL || cmp(*pointer,*ch_task) >= 0)&&(*pointer)->time_border<=time)
                 ch_task = pointer;
         }
-        struct s_tasks *buf = *ch_task;
-        *ch_task = buf->next_t;
-        now_task = buf;
-        now_task->entrypoint(now_task->aspace);
-        now_task = NULL;
-        pool_free(&tasks_pool,buf);
-
+        if (ch_task!=NULL) {
+            struct s_tasks *buf = *ch_task;
+            *ch_task = buf->next_t;
+            now_task = buf;
+            now_task->entrypoint(now_task->aspace);
+            now_task = NULL;
+            pool_free(&tasks_pool, buf);
+        }
     }
 
 }
