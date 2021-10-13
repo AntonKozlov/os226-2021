@@ -63,7 +63,7 @@ struct pool ctxpool = POOL_INITIALIZER_ARRAY(ctxarray);
 static void coapp_task(void *_ctx) {
         struct coapp_ctx *ctx = _ctx;
 
-        printf("%16s id %d cnt %d\n", __func__, 1 + ctx - ctxarray, ctx->cnt);
+        printf("%16s id %ld cnt %d\n", __func__, 1 + ctx - ctxarray, ctx->cnt);
 
         if (0 < ctx->cnt) {
                 sched_cont(coapp_task, ctx, 2);
@@ -75,7 +75,7 @@ static void coapp_task(void *_ctx) {
 static void coapp_rt(void *_ctx) {
         struct coapp_ctx *ctx = _ctx;
 
-        printf("%16s id %d cnt %d\n", __func__, 1 + ctx - ctxarray, ctx->cnt);
+        printf("%16s id %ld cnt %d\n", __func__, 1 + ctx - ctxarray, ctx->cnt);
 
         sched_time_elapsed(1);
 
@@ -128,7 +128,7 @@ static int pooltest(int argc, char *argv[]) {
 
 	if (!strcmp(argv[1], "alloc")) {
 		struct obj *o = pool_alloc(&objpool);
-		printf("alloc %d\n", o ? (o - objmem) : -1);
+		printf("alloc %ld\n", o ? (o - objmem) : -1);
 		return 0;
 	} else if (!strcmp(argv[1], "free")) {
 		int iobj = atoi(argv[2]);
