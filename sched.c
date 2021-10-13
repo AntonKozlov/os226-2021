@@ -218,6 +218,11 @@ void sched_cont(void (*entrypoint)(void *aspace),
 	}
 }
 
+void sched_time_elapsed(unsigned amount)
+{
+	time += amount;
+}
+
 void sched_start(void)
 {
 	policy_sort();
