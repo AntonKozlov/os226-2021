@@ -57,13 +57,13 @@ void sched_time_elapsed(unsigned amount) {
 void run (int (*cmp)(struct s_tasks* t1, struct s_tasks* t2)){
 
     while (head!=NULL){
-        struct s_tasks* ch_task = NULL;
-        for (struct s_tasks *pointer = head; pointer != NULL; pointer = pointer->next_t) {
-            if ((ch_task == NULL || cmp(pointer,pointer) >= 0)&&pointer->time_border<=time)
+        struct s_tasks** ch_task = NULL;
+        for (struct s_tasks **pointer = &head; *pointer != NULL; pointer = &((*pointer)->next_t)) {
+            if ((ch_task == NULL || cmp(*pointer,*ch_task) >= 0)&&(*pointer)->time_border<=time)
                 ch_task = pointer;
         }
-        struct s_tasks *buf = ch_task;
-        ch_task = buf->next_t;
+        struct s_tasks *buf = *ch_task;
+        *ch_task = buf->next_t;
         now_task = buf;
         now_task->entrypoint(now_task->aspace);
         now_task = NULL;
