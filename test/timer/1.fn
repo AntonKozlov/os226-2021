@@ -1,0 +1,27 @@
+#!/usr/bin/awk -f
+
+1 # echo everything
+
+BEGIN {
+	ecode = 0
+	last = -1
+}
+
+function error(msg) {
+	print msg
+	ecode = 1
+}
+
+$7 > $9 + 10 {
+	error("our time is slower than expected " $7 " vs " $9)
+}
+
+0 < last && $9 - last < 1010 {
+	error("sleep is shorter than expected");
+}
+
+{ last = $9 }
+
+END {
+	exit(ecode)
+}
