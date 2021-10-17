@@ -134,10 +134,30 @@ static int deadline_cmp(struct task *t1, struct task *t2) {
 
 static void tick_hnd(void) {
 	time += 1;
+	
+	while (waitq != NULL) {
+		if (waitq->waketime <= sched_gettime()) {
+			struct task *t = waitq;
+			waitq = waitq->next;
+			policy_run(t);
+		}
+		else break;
+	}
 }
 
 long sched_gettime(void) {
-	return time;
+	int time1 = time;
+	int time2 = time;
+
+	int cnt1 = timer_cnt();
+	int cnt2 = timer_cnt();
+	
+	if (cnt1 <= cnt2) {
+		return time1 + cnt2 / 1000;
+	}
+	else {
+		return time2 + cnt2 / 1000;
+	}
 }
 
 void sched_run(enum policy policy) {
