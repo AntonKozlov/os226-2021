@@ -1,8 +1,10 @@
 #include <string.h>
 #include <stdio.h>
-#include <malloc.h>
 
 #include "sched.h"
+#include "pool.h"
+
+#define MAX_TASKS_NUM 16
 
 // STRUCTS AND GLOBALS
 
@@ -27,10 +29,13 @@ static unsigned int time = 0;
 
 static struct sched_task* cur_task = NULL;
 
+static struct sched_node sched_node_array[MAX_TASKS_NUM];
+static struct pool sched_node_pool = POOL_INITIALIZER_ARRAY(sched_node_array);
+
 // HELPER FUNCTIONS
 
 void add_task(struct sched_task task) {
-    struct sched_node* node = malloc(sizeof(struct sched_node));
+    struct sched_node* node = pool_alloc(&sched_node_pool);
 
     if (node == NULL) {
         fprintf(stderr, "Task addition failed: cannot allocate memory for it\n");
@@ -61,7 +66,7 @@ void run_tasks(int (* is_preferable)(struct sched_task old_task, struct sched_ta
             cur_task = &(node->task);
             cur_task->entrypoint(cur_task->aspace);
             cur_task = NULL;
-            free(node);
+            pool_free(&sched_node_pool, node);
         }
     }
 }
