@@ -35,14 +35,16 @@ static int (*policy_cmp)(struct task *t1, struct task *t2);
 static struct task taskarray[16];
 static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
 
+static sigset_t set; //
+
 void irq_disable(void) {
-		sigset_t set;
 		sigprocmask(SIG_BLOCK, &set, NULL);
+		sigaddset(&set, SIGALRM);
 }
 
 void irq_enable(void) {
-		sigset_t set;
 		sigprocmask(SIG_UNBLOCK, &set, NULL);
+		sigaddset(&set, SIGALRM);
 }
 
 static void policy_run(struct task *t) {
