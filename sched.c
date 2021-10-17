@@ -4,7 +4,7 @@
 #include "sched.h"
 #include "pool.h"
 
-static int time = 0;
+static int time;
 
 
 struct task {
@@ -13,7 +13,7 @@ struct task {
     void *aspace;
     int priority;
     int deadline;
-    int timeout;
+    int waketime;
     struct task *next;
 } task_array[16];
 
@@ -50,14 +50,13 @@ void add_task(void (*entrypoint)(void *),
     task->aspace = aspace;
     task->priority = priority;
     task->deadline = deadline;
-    task->timeout = timeout;
+    task->waketime = timeout;
     task->next = task_list.first;
     task_list.first = task;
 }
 
 void delete_task() {
     if (current == NULL) return;
-
     if (current == task_list.first) {
         task_list.first = current->next;
     } else {
@@ -97,7 +96,7 @@ void run_tasks(struct task *(*policy)(struct task *, struct task *)) {
         struct task *chosen_task = task_list.first, *next_task = chosen_task->next;
         for (; next_task != NULL; next_task = next_task->next)
             chosen_task = policy(chosen_task, next_task);
-        if (chosen_task->timeout > time) {
+        if (chosen_task->waketime > time) {
             sched_time_elapsed(1);
             continue;
         }
@@ -112,17 +111,17 @@ void run_tasks(struct task *(*policy)(struct task *, struct task *)) {
 }
 
 struct task *policy_fifo(struct task *chosen_task, struct task *next_task) {
-    return (next_task->timeout > time) ? chosen_task : next_task;
+    return (next_task->waketime > time) ? chosen_task : next_task;
 }
 
 struct task *policy_prio(struct task *chosen_task, struct task *next_task) {
-    if (next_task->timeout > time) return chosen_task;
-    return (chosen_task->timeout <= time && chosen_task->priority > next_task->priority) ?
+    if (next_task->waketime > time) return chosen_task;
+    return (chosen_task->waketime <= time && chosen_task->priority > next_task->priority) ?
            chosen_task : next_task;
 }
 
 struct task *policy_deadline(struct task *chosen_task, struct task *next_task) {
-    return next_task->timeout <= time &&
+    return next_task->waketime <= time &&
            ((0 < next_task->deadline && (next_task->deadline < chosen_task->deadline || chosen_task->deadline <= 0)) ||
             (next_task->deadline == chosen_task->deadline && next_task->priority >= chosen_task->priority)) ? next_task
                                                                                                             : chosen_task;
