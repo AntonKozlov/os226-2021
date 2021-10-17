@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <unistd.h>
+#include <time.h>
+#include <sys/time.h>
 
 #include "sched.h"
 #include "usyscall.h"
@@ -37,6 +40,7 @@ struct pool ctxpool = POOL_INITIALIZER_ARRAY(ctxarray);
         X(syscalltest) \
         X(coapp) \
         X(cosched) \
+        X(irqtest) \
 
 #define DECLARE(X) static int X(int, char* []);
 
@@ -55,6 +59,12 @@ static const struct app {
 };
 
 // APPLICATIONS
+
+static long reftime(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 
 static int os_printf(const char* fmt, ...) {
     char buf[128];
@@ -112,9 +122,7 @@ static void coapp_task(void* _ctx) {
 
     printf("%16s id %ld cnt %d\n", __func__, 1 + ctx - ctxarray, ctx->cnt);
 
-    if (0 < ctx->cnt) {
-        sched_cont(coapp_task, ctx, 2);
-    }
+    if (0 < ctx->cnt) sched_cont(coapp_task, ctx, 2);
 
     --ctx->cnt;
 }
@@ -126,9 +134,23 @@ static void coapp_rt(void* _ctx) {
 
     sched_time_elapsed(1);
 
-    if (0 < ctx->cnt) {
-        sched_cont(coapp_rt, ctx, 0);
-    }
+    if (0 < ctx->cnt) sched_cont(coapp_rt, ctx, 0);
+
+    --ctx->cnt;
+}
+
+static void coapp_sleep(void* _ctx) {
+    struct coapp_ctx* ctx = _ctx;
+
+    static long refstart;
+    if (!refstart) refstart = reftime();
+
+    sched_time_elapsed(10);
+
+    printf("%16s id %ld cnt %d time %ld reftime %ld\n",
+           __func__, 1 + ctx - ctxarray, ctx->cnt, sched_gettime(), reftime() - refstart);
+
+    if (0 < ctx->cnt) sched_cont(coapp_sleep, ctx, 1000);
 
     --ctx->cnt;
 }
@@ -139,7 +161,7 @@ static int coapp(int argc, char* argv[]) {
     struct coapp_ctx* ctx = pool_alloc(&ctxpool);
     ctx->cnt = (int) strtol(argv[2], NULL, 10);
 
-    void (* entries[])(void*) = {coapp_task, coapp_rt};
+    void (* entries[])(void*) = {coapp_task, coapp_rt, coapp_sleep};
     sched_new(entries[entry_id], ctx, (int) strtol(argv[3], NULL, 10), (int) strtol(argv[4], NULL, 10));
 
     return OK;
@@ -147,6 +169,27 @@ static int coapp(int argc, char* argv[]) {
 
 static int cosched(int argc, char* argv[]) {
     sched_run(strtol(argv[1], NULL, 10));
+    return OK;
+}
+
+static int irqtest(int argc, char* argv[]) {
+    sched_run(0);
+
+    static long refstart;
+    if (!refstart) refstart = reftime();
+
+    sched_time_elapsed(10);
+
+    printf("%16s time %ld reftime %ld\n", __func__, sched_gettime(), reftime() - refstart);
+
+    irq_disable();
+    while (reftime() < refstart + 1000) {
+        // nop
+    }
+    irq_enable();
+
+    printf("%16s time %ld reftime %ld\n", __func__, sched_gettime(), reftime() - refstart);
+
     return OK;
 }
 

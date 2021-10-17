@@ -1,7 +1,10 @@
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <signal.h>
 
 #include "sched.h"
+#include "timer.h"
 #include "pool.h"
 
 #define MAX_TASKS_NUM 16
@@ -31,6 +34,16 @@ static struct sched_task* cur_task = NULL;
 
 static struct sched_node sched_node_array[MAX_TASKS_NUM];
 static struct pool sched_node_pool = POOL_INITIALIZER_ARRAY(sched_node_array);
+
+// IRQ HANDLING
+
+void irq_disable(void) {
+    // TODO: sigprocmask
+}
+
+void irq_enable(void) {
+    // TODO: sigprocmask
+}
 
 // HELPER FUNCTIONS
 
@@ -64,9 +77,15 @@ void run_tasks(int (* is_preferable)(struct sched_task old_task, struct sched_ta
             if (prev != NULL) prev->next = node->next;
             else sched_task_list.first = node->next;
             cur_task = &(node->task);
+            irq_enable();
             cur_task->entrypoint(cur_task->aspace);
+            irq_disable();
             cur_task = NULL;
             pool_free(&sched_node_pool, node);
+        } else {
+            irq_enable();
+            pause();
+            irq_disable();
         }
     }
 }
@@ -98,16 +117,34 @@ void sched_new(void (* entrypoint)(void* aspace),
 void sched_cont(void (* entrypoint)(void* aspace),
                 void* aspace,
                 int timeout) {
-    if (cur_task == NULL) return;
-    struct sched_task task = {entrypoint, aspace, cur_task->priority, cur_task->deadline, time + timeout};
-    add_task(task);
+    irq_disable();
+
+    if (cur_task != NULL) {
+        struct sched_task task = {entrypoint, aspace, cur_task->priority, cur_task->deadline, time + timeout};
+        add_task(task);
+    }
+
+    irq_enable();
 }
 
 void sched_time_elapsed(unsigned amount) {
-    time += amount;
+    unsigned int endtime = time + amount;
+    while (time < endtime) pause();
+}
+
+static void tick_hnd(void) {
+    // TODO
+}
+
+long sched_gettime(void) {
+    // TODO: timer_cnt
 }
 
 void sched_run(enum policy policy) {
+    timer_init(1, tick_hnd);
+
+    irq_disable();
+
     switch (policy) {
         case POLICY_FIFO:
             run_tasks(&is_preferable_by_fifo);
@@ -122,4 +159,6 @@ void sched_run(enum policy policy) {
             fprintf(stderr, "Unknown policy provided\n");
             break;
     }
+
+    irq_enable();
 }

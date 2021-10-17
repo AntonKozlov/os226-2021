@@ -18,6 +18,7 @@ jobs:
           - pool
           - syscall
           - cosched
+          - timer
 
     steps:
     - uses: actions/checkout@v2

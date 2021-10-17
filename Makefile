@@ -7,7 +7,7 @@ all : main
 main : $(patsubst %.c,%.o,$(wildcard *.c))
 	$(CC) $(LDFLAGS) $^ $(LOADLIBES) $(LDLIBS) -o $@
 
-test :
+test : all
 	./test/run.sh ; echo $$?
 
 clean :

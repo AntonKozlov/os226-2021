@@ -30,3 +30,12 @@ extern void sched_time_elapsed(unsigned amount);
 
 // Scheduler loop, start executing tasks until all of them finish
 extern void sched_run(enum policy policy);
+
+// Milliseconds since system start
+extern long sched_gettime(void);
+
+// DANGEROUS: only for tests
+
+extern void irq_disable(void);
+
+extern void irq_enable(void);
