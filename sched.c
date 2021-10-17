@@ -155,7 +155,7 @@ void sched_run(enum policy policy) {
 
 	irq_disable();
 
-	while (runq || waitq) {
+	while (runq) {
 		current = runq;
 		if (current) {
 			runq = current->next;
