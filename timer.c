@@ -1,19 +1,49 @@
 #define _GNU_SOURCE
 
-#include <limits.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
-#include <unistd.h>
 #include <sys/time.h>
 
 #include "timer.h"
 
 int timer_cnt(void) {
-    // TODO: getitimer
+    struct itimerval timer_value;
+
+    if (getitimer(ITIMER_REAL, &timer_value) == -1) {
+        fprintf(stderr, "Failed to obtain a value of the timer");
+        return -1;
+    }
+
+    long time_left, interval;
+
+    if (timer_value.it_value.tv_usec > 0) time_left = timer_value.it_value.tv_usec;
+    else if (timer_value.it_value.tv_sec > 0) time_left = timer_value.it_value.tv_sec * 1000000;
+    else {
+        fprintf(stderr, "Cannot determine timer count: the timer is disarmed");
+        return -1;
+    }
+
+    if (timer_value.it_interval.tv_usec > 0) interval = timer_value.it_interval.tv_usec;
+    else if (timer_value.it_interval.tv_sec > 0) interval = timer_value.it_interval.tv_sec * 1000000;
+    else {
+        fprintf(stderr, "Cannot determine timer count: the timer is single-shot");
+        return -1;
+    }
+
+    return (int) (interval - time_left);
 }
 
 void timer_init(int ms, void (* hnd)(void)) {
-    // TODO: setitimer
+    const struct timeval interval = {0, ms * 1000};
+    const struct itimerval timer_value = {interval, interval};
+
+    if (setitimer(ITIMER_REAL, &timer_value, NULL) == -1) {
+        fprintf(stderr, "Failed to setup the timer");
+    }
+
+    if (signal(SIGALRM, (__sighandler_t) hnd) == SIG_ERR) {
+        fprintf(stderr, "Failed to setup a handler for the timer");
+    }
 }

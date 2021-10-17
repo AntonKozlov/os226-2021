@@ -1,6 +1,7 @@
 #pragma once
 
-// Returns number of microseconds (usec) since the latests interrupt
+// Returns number of microseconds (usec) since the latest interrupt
 extern int timer_cnt(void);
 
+// Initializes the timer to run hnd each time ms milliseconds passes
 extern void timer_init(int ms, void (* hnd)(void));

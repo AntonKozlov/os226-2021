@@ -7,6 +7,7 @@
 #include "timer.h"
 #include "pool.h"
 
+#define TICK_PERIOD_MS 1
 #define MAX_TASKS_NUM 16
 
 // STRUCTS AND GLOBALS
@@ -38,11 +39,15 @@ static struct pool sched_node_pool = POOL_INITIALIZER_ARRAY(sched_node_array);
 // IRQ HANDLING
 
 void irq_disable(void) {
-    // TODO: sigprocmask
+    sigset_t sigset;
+    if (sigemptyset(&sigset) == -1 || sigaddset(&sigset, SIGALRM) == -1 ||
+        sigprocmask(SIG_BLOCK, &sigset, NULL) == -1) fprintf(stderr, "Failed to disable timer IRQ");
 }
 
 void irq_enable(void) {
-    // TODO: sigprocmask
+    sigset_t sigset;
+    if (sigemptyset(&sigset) == -1 || sigaddset(&sigset, SIGALRM) == -1 ||
+        sigprocmask(SIG_UNBLOCK, &sigset, NULL) == -1) fprintf(stderr, "Failed to enable timer IRQ");
 }
 
 // HELPER FUNCTIONS
@@ -128,20 +133,28 @@ void sched_cont(void (* entrypoint)(void* aspace),
 }
 
 void sched_time_elapsed(unsigned amount) {
+    irq_disable();
+
     unsigned int endtime = time + amount;
-    while (time < endtime) pause();
+    while (time < endtime) {
+        irq_enable();
+        pause();
+        irq_disable();
+    }
+
+    irq_enable();
 }
 
 static void tick_hnd(void) {
-    // TODO
+    time += TICK_PERIOD_MS;
 }
 
 long sched_gettime(void) {
-    // TODO: timer_cnt
+    return time;
 }
 
 void sched_run(enum policy policy) {
-    timer_init(1, tick_hnd);
+    timer_init(TICK_PERIOD_MS, tick_hnd);
 
     irq_disable();
 
