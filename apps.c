@@ -4,6 +4,13 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
+
+#include <time.h>
+#include <sys/time.h>
+
+#include <time.h>
+#include <sys/time.h>
 
 #include "sched.h"
 #include "usyscall.h"
@@ -18,6 +25,7 @@ static int g_retcode;
         X(syscalltest) \
         X(coapp) \
         X(cosched) \
+        X(irqtest) \
 
 #define DECLARE(X) static int X(int, char *[]);
 APPS_X(DECLARE)
@@ -31,6 +39,12 @@ static const struct app {
         APPS_X(ELEM)
 #undef ELEM
 };
+
+static long reftime(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 
 static int os_printf(const char *fmt, ...) {
 	char buf[128];
@@ -86,13 +100,33 @@ static void coapp_rt(void *_ctx) {
         --ctx->cnt;
 }
 
+static void coapp_sleep(void *_ctx) {
+	struct coapp_ctx *ctx = _ctx;
+
+	static long refstart;
+	if (!refstart) {
+		refstart = reftime();
+	}
+
+	sched_time_elapsed(10);
+
+	printf("%16s id %d cnt %d time %ld reftime %ld\n",
+			__func__, 1 + ctx - ctxarray, ctx->cnt, sched_gettime(), reftime() - refstart);
+
+	if (0 < ctx->cnt) {
+		sched_cont(coapp_sleep, ctx, 1000);
+	}
+
+	--ctx->cnt;
+}
+
 static int coapp(int argc, char* argv[]) {
         int entry_id = atoi(argv[1]) - 1;
 
         struct coapp_ctx *ctx = pool_alloc(&ctxpool);
         ctx->cnt = atoi(argv[2]);
 
-        void (*entries[])(void*) = { coapp_task, coapp_rt };
+        void (*entries[])(void*) = { coapp_task, coapp_rt, coapp_sleep };
         sched_new(entries[entry_id], ctx, atoi(argv[3]), atoi(argv[4]));
 }
 
@@ -142,6 +176,31 @@ static int pooltest(int argc, char *argv[]) {
 static int syscalltest(int argc, char *argv[]) {
 	int r = os_printf("%s\n", argv[1]);
 	return r - 1;
+}
+
+static int irqtest(int argc, char* argv[]) {
+	sched_run(0);
+
+	static long refstart;
+	if (!refstart) {
+		refstart = reftime();
+	}
+
+	sched_time_elapsed(10);
+
+	printf("%16s time %ld reftime %ld\n",
+			__func__, sched_gettime(), reftime() - refstart);
+
+	irq_disable();
+	while (reftime() < refstart + 1000) {
+		// nop
+	}
+	irq_enable();
+
+	printf("%16s time %ld reftime %ld\n",
+			__func__, sched_gettime(), reftime() - refstart);
+
+	return 0;
 }
 
 int shell(int argc, char *argv[]) {
