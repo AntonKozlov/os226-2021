@@ -11,7 +11,7 @@
 #include "timer.h"
 
 static int get_usec_total(struct timeval *timeval) {
-	return 1000000 * timeval->tv_usec + timeval->tv_sec;
+	return 1000000 * timeval->tv_sec + timeval->tv_usec;
 }
 
 int timer_cnt(void) {
