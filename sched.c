@@ -7,6 +7,7 @@
 #include "sched.h"
 #include "timer.h"
 #include "pool.h"
+static int time = 0;
 
 struct task {
 	void (*entry)(void *as);
@@ -116,6 +117,7 @@ void sched_time_elapsed(unsigned amount) {
 static int fifo_cmp(struct task *t1, struct task *t2) {
 	return -1;
 }
+void run (int (*cmp)(struct s_tasks* t1, struct s_tasks* t2)){
 
 static int prio_cmp(struct task *t1, struct task *t2) {
 	return t2->priority - t1->priority;
@@ -170,3 +172,4 @@ void sched_run(enum policy policy) {
 
 	irq_enable();
 }
+

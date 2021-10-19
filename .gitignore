@@ -7,3 +7,7 @@
 # IDE and tooling
 /tags
 /.vagrant
+
+*.xml
+
+/*
