@@ -27,7 +27,7 @@ int timer_cnt(void) {
 void timer_init(int ms, void (*hnd)(void)) {
     struct timeval interval = {
             .tv_sec  = ms / 1000,
-            .tv_usec = ms * 1000 % 1000
+            .tv_usec = (ms * 1000) % 1000000
     };
 
     struct itimerval new_value = {

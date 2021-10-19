@@ -23,6 +23,8 @@ struct task {
 
 static int time;
 
+static sigset_t sigset;
+
 static struct task *current;
 static struct task *runq;
 static struct task *waitq;
@@ -36,11 +38,19 @@ static struct task taskarray[16];
 static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
 
 void irq_disable(void) {
-        // TODO: sigprocmask
+    if (sigaddset(&sigset, SIGALRM) ||
+        sigprocmask(SIG_BLOCK, &sigset, NULL)) {
+        fprintf(stderr, "An error occurred while disabling timer IRQ");
+        exit(-1);
+    }
 }
 
 void irq_enable(void) {
-        // TODO: sigprocmask
+    if (sigaddset(&sigset, SIGALRM) ||
+        sigprocmask(SIG_UNBLOCK, &sigset, NULL)) {
+        fprintf(stderr, "An error occurred while disabling timer IRQ");
+        exit(-1);
+    }
 }
 
 static void policy_run(struct task *t) {
@@ -104,13 +114,17 @@ out:
 }
 
 void sched_time_elapsed(unsigned amount) {
-	// TODO
-#if 0
-	int endtime = time + amount; 
-	while (time < endtime) {
-		pause();
-	}
-#endif
+    irq_disable();
+
+    int endtime = time + amount;
+
+    while (time < endtime) {
+        irq_enable();
+        pause();
+        irq_disable();
+    }
+
+    irq_enable();
 }
 
 static int fifo_cmp(struct task *t1, struct task *t2) {
@@ -130,11 +144,20 @@ static int deadline_cmp(struct task *t1, struct task *t2) {
 }
 
 static void tick_hnd(void) {
-	// TODO
+    time++;
+
+    while (waitq) {
+        if (waitq->waketime <= sched_gettime()) {
+            struct task *t = waitq;
+            policy_run(t);
+            waitq = waitq->next;
+        }
+        else break;
+    }
 }
 
 long sched_gettime(void) {
-	// TODO: timer_cnt
+	return time + timer_cnt() / 1000;
 }
 
 void sched_run(enum policy policy) {
