@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -7,22 +9,28 @@
 #include "timer.h"
 #include "pool.h"
 
-static int time;
+#define TIME_PERIOD_MS 1
+
+static int time = 0;
 
 void irq_disable(void) {
-    // TODO: sigprocmask
+    sigset_t sigset;
+    if (sigemptyset(&sigset) || sigaddset(&sigset, SIGALRM) || sigprocmask(SIG_BLOCK, &sigset, NULL))
+        fprintf(stderr, "irq_disable() error");
 }
 
 void irq_enable(void) {
-    // TODO: sigprocmask
+    sigset_t sigset;
+    if (sigemptyset(&sigset) || sigaddset(&sigset, SIGALRM) || sigprocmask(SIG_UNBLOCK, &sigset, NULL))
+        fprintf(stderr, "irq_enable() error");
 }
 
 static void tick_hnd(void) {
-    // TODO
+    time += TIME_PERIOD_MS;
 }
 
 long sched_gettime(void) {
-    // TODO: timer_cnt
+    return time + timer_cnt() / 1000;
 }
 
 struct task {
@@ -101,7 +109,7 @@ void sched_cont(void (*entrypoint)(void *),
 }
 
 void sched_run(enum policy policy) {
-    timer_init(1, tick_hnd);
+    timer_init(TIME_PERIOD_MS, tick_hnd);
     irq_disable();
     if (policy == POLICY_FIFO) run_tasks(policy_fifo);
     else if (policy == POLICY_PRIO) run_tasks(policy_prio);
@@ -110,13 +118,14 @@ void sched_run(enum policy policy) {
 }
 
 void sched_time_elapsed(unsigned amount) {
-    // TODO
-#if 0
-    int endtime = time + amount;
+    irq_disable();
+    int endtime = time + (int) amount;
     while (time < endtime) {
+        irq_enable();
         pause();
+        irq_disable();
     }
-#endif
+    irq_enable();
 }
 
 void run_tasks(struct task *(*policy)(struct task *, struct task *)) {

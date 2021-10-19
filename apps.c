@@ -4,7 +4,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-
 #include <sys/time.h>
 #include <time.h>
 
@@ -76,9 +75,9 @@ int retcode(int argc, char *argv[]) {
 }
 
 static long reftime(void) {
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
 static int os_printf(const char *fmt, ...) {
@@ -88,41 +87,6 @@ static int os_printf(const char *fmt, ...) {
     int ret = vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     return os_print(buf, ret);
-}
-
-int exec_commands(const int token_num, char **tokens) {
-    char *cmd_name = tokens[0];
-    const struct app *app = NULL;
-    for (int i = 0; i < ARRAY_SIZE(app_list); ++i) {
-        if (!strcmp(cmd_name, app_list[i].name)) {
-            app = &app_list[i];
-            break;
-        }
-    }
-
-    if (!app) {
-        if (printf("%s: command not found\n", cmd_name) < 0)
-            return ERROR;
-        return_code = NOT_FOUND_COMMAND_ERROR;
-        return OK;
-    }
-
-    return_code = app->fn(token_num, tokens);
-    return OK;
-}
-
-int parse_with_delim(char *buf, char ***container, int *container_size, const char *delim) {
-    *container = NULL;
-    *container_size = 0;
-    char *cmd = strtok(buf, delim);
-    while (cmd && cmd[0] != '#') {
-        *container = realloc(*container, sizeof(char *) * ++(*container_size));
-        if (!*container)
-            return ERROR;
-        (*container)[(*container_size) - 1] = cmd;
-        cmd = strtok(NULL, delim);
-    }
-    return OK;
 }
 
 //------------------------------------------------------------------------------------------------------ TASK SCHEDULER
@@ -160,23 +124,23 @@ static void coapp_rt(void *_ctx) {
 }
 
 static void coapp_sleep(void *_ctx) {
-	struct coapp_ctx *ctx = _ctx;
+    struct coapp_ctx *ctx = _ctx;
 
-	static long refstart;
-	if (!refstart) {
-		refstart = reftime();
-	}
+    static long refstart;
+    if (!refstart) {
+        refstart = reftime();
+    }
 
-	sched_time_elapsed(10);
+    sched_time_elapsed(10);
 
-	printf("%16s id %ld cnt %d time %ld reftime %ld\n",
-			__func__, 1 + ctx - ctxarray, ctx->cnt, sched_gettime(), reftime() - refstart);
+    printf("%16s id %ld cnt %d time %ld reftime %ld\n",
+           __func__, 1 + ctx - ctxarray, ctx->cnt, sched_gettime(), reftime() - refstart);
 
-	if (0 < ctx->cnt) {
-		sched_cont(coapp_sleep, ctx, 1000);
-	}
+    if (0 < ctx->cnt) {
+        sched_cont(coapp_sleep, ctx, 1000);
+    }
 
-	--ctx->cnt;
+    --ctx->cnt;
 }
 
 static int coapp(int argc, char *argv[]) {
@@ -223,7 +187,7 @@ static int syscalltest(int argc, char *argv[]) {
     return r - 1;
 }
 
-static int irqtest(int argc, char* argv[]) {
+static int irqtest(int argc, char *argv[]) {
     sched_run(0);
 
     static long refstart;
@@ -249,6 +213,41 @@ static int irqtest(int argc, char* argv[]) {
 }
 
 //---------------------------------------------------------------------------------------------------------------- MAIN
+
+int exec_commands(const int token_num, char **tokens) {
+    char *cmd_name = tokens[0];
+    const struct app *app = NULL;
+    for (int i = 0; i < ARRAY_SIZE(app_list); ++i) {
+        if (!strcmp(cmd_name, app_list[i].name)) {
+            app = &app_list[i];
+            break;
+        }
+    }
+
+    if (!app) {
+        if (printf("%s: command not found\n", cmd_name) < 0)
+            return ERROR;
+        return_code = NOT_FOUND_COMMAND_ERROR;
+        return OK;
+    }
+
+    return_code = app->fn(token_num, tokens);
+    return OK;
+}
+
+int parse_with_delim(char *buf, char ***container, int *container_size, const char *delim) {
+    *container = NULL;
+    *container_size = 0;
+    char *cmd = strtok(buf, delim);
+    while (cmd && cmd[0] != '#') {
+        *container = realloc(*container, sizeof(char *) * ++(*container_size));
+        if (!*container)
+            return ERROR;
+        (*container)[(*container_size) - 1] = cmd;
+        cmd = strtok(NULL, delim);
+    }
+    return OK;
+}
 
 int shell(int argc, char *argv[]) {
     char buf[MAX_INPUT_STRING_LENGTH];

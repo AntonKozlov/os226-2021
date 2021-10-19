@@ -1,7 +1,4 @@
-
 #define _GNU_SOURCE
-
-#include "syscall.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -9,6 +6,8 @@
 #include <stdio.h>
 #include <signal.h>
 #include <sys/ucontext.h>
+
+#include "syscall.h"
 
 extern int shell(int argc, char *argv[]);
 
@@ -21,9 +20,9 @@ static void sighnd(int sig, siginfo_t *info, void *ctx) {
         abort();
     }
 
-    regs[REG_RAX] = syscall_do(regs[REG_RAX], regs[REG_RBX],
-                               regs[REG_RCX], regs[REG_RDX],
-                               regs[REG_RSI], (void *) regs[REG_RDI]);
+    regs[REG_RAX] = (greg_t) syscall_do((int) regs[REG_RAX], regs[REG_RBX],
+                                        regs[REG_RCX], regs[REG_RDX],
+                                        regs[REG_RSI], (void *) regs[REG_RDI]);
 
     regs[REG_RIP] += 2;
 }

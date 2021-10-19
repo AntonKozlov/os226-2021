@@ -36,4 +36,5 @@ extern long sched_gettime(void);
 
 // DANGEROUS: only for tests
 extern void irq_disable(void);
+
 extern void irq_enable(void);
