@@ -16,18 +16,14 @@ int timer_cnt(void) {
         return -1;
     }
 
-    long time_left, interval;
-
-    if (timer_value.it_value.tv_usec > 0) time_left = timer_value.it_value.tv_usec;
-    else if (timer_value.it_value.tv_sec > 0) time_left = timer_value.it_value.tv_sec * 1000000;
-    else {
+    long time_left = timer_value.it_value.tv_sec * 1000000 + timer_value.it_value.tv_usec;
+    if (time_left == 0) {
         fprintf(stderr, "Cannot determine timer count: the timer is disarmed");
         return -1;
     }
 
-    if (timer_value.it_interval.tv_usec > 0) interval = timer_value.it_interval.tv_usec;
-    else if (timer_value.it_interval.tv_sec > 0) interval = timer_value.it_interval.tv_sec * 1000000;
-    else {
+    long interval = timer_value.it_interval.tv_sec * 1000000 + timer_value.it_interval.tv_usec;
+    if (interval == 0) {
         fprintf(stderr, "Cannot determine timer count: the timer is single-shot");
         return -1;
     }

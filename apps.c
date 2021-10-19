@@ -1,10 +1,10 @@
+#define _GNU_SOURCE
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
-#include <unistd.h>
 #include <time.h>
-#include <sys/time.h>
 
 #include "sched.h"
 #include "usyscall.h"

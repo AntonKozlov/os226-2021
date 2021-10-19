@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -150,7 +152,7 @@ static void tick_hnd(void) {
 }
 
 long sched_gettime(void) {
-    return time;
+    return time + timer_cnt() / 1000;
 }
 
 void sched_run(enum policy policy) {
