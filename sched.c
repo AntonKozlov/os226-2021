@@ -1,11 +1,29 @@
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <signal.h>
 
 #include "sched.h"
+#include "timer.h"
 #include "pool.h"
 
 static int time;
 
+void irq_disable(void) {
+    // TODO: sigprocmask
+}
+
+void irq_enable(void) {
+    // TODO: sigprocmask
+}
+
+static void tick_hnd(void) {
+    // TODO
+}
+
+long sched_gettime(void) {
+    // TODO: timer_cnt
+}
 
 struct task {
     void (*entrypoint)(void *);
@@ -77,18 +95,28 @@ void sched_new(void (*entrypoint)(void *),
 void sched_cont(void (*entrypoint)(void *),
                 void *aspace,
                 int timeout) {
-    if (current == NULL) return;
-    add_task(entrypoint, aspace, current->priority, current->deadline, time + timeout);
-}
-
-void sched_time_elapsed(unsigned amount) {
-    time += (int) amount;
+    irq_disable();
+    if (current != NULL) add_task(entrypoint, aspace, current->priority, current->deadline, time + timeout);
+    irq_enable();
 }
 
 void sched_run(enum policy policy) {
+    timer_init(1, tick_hnd);
+    irq_disable();
     if (policy == POLICY_FIFO) run_tasks(policy_fifo);
     else if (policy == POLICY_PRIO) run_tasks(policy_prio);
     else if (policy == POLICY_DEADLINE) run_tasks(policy_deadline);
+    irq_enable();
+}
+
+void sched_time_elapsed(unsigned amount) {
+    // TODO
+#if 0
+    int endtime = time + amount;
+    while (time < endtime) {
+        pause();
+    }
+#endif
 }
 
 void run_tasks(struct task *(*policy)(struct task *, struct task *)) {
@@ -97,11 +125,16 @@ void run_tasks(struct task *(*policy)(struct task *, struct task *)) {
         for (; next_task != NULL; next_task = next_task->next)
             chosen_task = policy(chosen_task, next_task);
         if (chosen_task->waketime > time) {
-            sched_time_elapsed(1);
+            irq_enable();
+            pause();
+            irq_disable();
             continue;
         }
         current = chosen_task;
+
+        irq_enable();
         current->entrypoint(current->aspace);
+        irq_disable();
 
         delete_task();
 
