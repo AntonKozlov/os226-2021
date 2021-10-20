@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <limits.h>
 #include <string.h>
 #include <stdio.h>
@@ -35,12 +37,23 @@ static int (*policy_cmp)(struct task *t1, struct task *t2);
 static struct task taskarray[16];
 static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
 
+static sigset_t prev_sigmask;
+static int irq_enabled = 1;
+
 void irq_disable(void) {
-        // TODO: sigprocmask
+    if (irq_enabled) {
+        irq_enabled = 0;
+        sigset_t sig_set;
+        sigfillset(&sig_set);
+        sigprocmask(SIG_SETMASK, &sig_set, &prev_sigmask);
+    }
 }
 
 void irq_enable(void) {
-        // TODO: sigprocmask
+    if (!irq_enabled) {
+        sigprocmask(SIG_SETMASK, &prev_sigmask, NULL);
+        irq_enabled = 1;
+    }
 }
 
 static void policy_run(struct task *t) {
@@ -103,14 +116,25 @@ out:
 	irq_enable();
 }
 
+static void tick_hnd(void) {
+    time++;
+    while (waitq != NULL && waitq->waketime <= sched_gettime()) {
+        struct task *t = waitq;
+        waitq = waitq->next;
+        policy_run(t);
+    }
+}
+
 void sched_time_elapsed(unsigned amount) {
-	// TODO
-#if 0
-	int endtime = time + amount; 
-	while (time < endtime) {
-		pause();
-	}
-#endif
+    irq_disable();
+	int end_time = time + amount;
+	struct sigaction alarm_action;
+	sigaction(SIGALRM, NULL, &alarm_action);
+	while (time < end_time && alarm_action.sa_handler == tick_hnd) {
+        sigsuspend(&prev_sigmask);
+        sigaction(SIGALRM, NULL, &alarm_action);
+    }
+    irq_enable();
 }
 
 static int fifo_cmp(struct task *t1, struct task *t2) {
@@ -129,12 +153,8 @@ static int deadline_cmp(struct task *t1, struct task *t2) {
 	return prio_cmp(t1, t2);
 }
 
-static void tick_hnd(void) {
-	// TODO
-}
-
 long sched_gettime(void) {
-	// TODO: timer_cnt
+    return time + timer_cnt() / 1000;
 }
 
 void sched_run(enum policy policy) {
@@ -170,3 +190,4 @@ void sched_run(enum policy policy) {
 
 	irq_enable();
 }
+
