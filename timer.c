@@ -11,9 +11,19 @@
 #include "timer.h"
 
 int timer_cnt(void) {
-	// TODO: getitimer
+    struct itimerval value_of_timer;
+    getitimer(ITIMER_REAL, &value_of_timer);
+    return value_of_timer.it_interval.tv_sec * 1000000 + value_of_timer.it_interval.tv_usec -
+            value_of_timer.it_value.tv_sec * 1000000 - value_of_timer.it_value.tv_usec;
 }
 
 void timer_init(int ms, void (*hnd)(void)) {
-	// TODO: setitimer
+    struct timeval timer_interval;
+    struct itimerval timer;
+    timer_interval.tv_sec = ms / 1000;
+    timer_interval.tv_usec = (ms % 1000) * 1000;
+    timer.it_interval = timer_interval;
+    timer.it_value = timer_interval;
+    setitimer(ITIMER_REAL, &timer, NULL);
+    signal(SIGALRM, hnd);
 }

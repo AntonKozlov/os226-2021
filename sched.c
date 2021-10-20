@@ -24,6 +24,8 @@ struct task {
 
 static int time;
 
+static sigset_t sigset_str;
+
 static struct task *current;
 static struct task *runq;
 static struct task *waitq;
@@ -37,11 +39,13 @@ static struct task taskarray[16];
 static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
 
 void irq_disable(void) {
-        // TODO: sigprocmask
+    sigaddset(&sigset_str, SIGALRM);
+    sigprocmask(SIG_BLOCK, &sigset_str, NULL);
 }
 
 void irq_enable(void) {
-        // TODO: sigprocmask
+    sigaddset(&sigset_str, SIGALRM);
+    sigprocmask(SIG_UNBLOCK, &sigset_str, NULL);
 }
 
 static void policy_run(struct task *t) {
@@ -105,71 +109,78 @@ out:
 }
 
 void sched_time_elapsed(unsigned amount) {
-	// TODO
-#if 0
-	int endtime = time + amount; 
-	while (time < endtime) {
-		pause();
-	}
-#endif
+    irq_disable();
+    int end = time + amount;
+    while (time < end) {
+        irq_enable();
+        pause();
+        irq_disable();
+    }
+    irq_enable();
 }
 
 static int fifo_cmp(struct task *t1, struct task *t2) {
 	return -1;
 }
-void run (int (*cmp)(struct s_tasks* t1, struct s_tasks* t2)){
 
-static int prio_cmp(struct task *t1, struct task *t2) {
-	return t2->priority - t1->priority;
-}
+    static int prio_cmp(struct task *t1, struct task *t2) {
+        return t2->priority - t1->priority;
+    }
 
-static int deadline_cmp(struct task *t1, struct task *t2) {
-	int d = t1->deadline - t2->deadline;
-	if (d) {
-		return d;
-	}
-	return prio_cmp(t1, t2);
-}
+    static int deadline_cmp(struct task *t1, struct task *t2) {
+        int d = t1->deadline - t2->deadline;
+        if (d) {
+            return d;
+        }
+        return prio_cmp(t1, t2);
+    }
 
-static void tick_hnd(void) {
-	// TODO
-}
+    static void tick_hnd(void) {
+        time++;
+        while (waitq != NULL) {
+            if (waitq->waketime <= sched_gettime()) {
+                struct task *tsk = waitq;
+                policy_run(tsk);
+                waitq = waitq->next;
+            } else
+                break;
+        }
+    }
 
-long sched_gettime(void) {
-	// TODO: timer_cnt
-}
+    long sched_gettime(void) {
+        return time + timer_cnt() / 1000;
+    }
 
-void sched_run(enum policy policy) {
-	int (*policies[])(struct task *t1, struct task *t2) = { fifo_cmp, prio_cmp, deadline_cmp };
-	policy_cmp = policies[policy];
+    void sched_run(enum policy policy) {
+        int (*policies[])(struct task *t1, struct task *t2) = {fifo_cmp, prio_cmp, deadline_cmp};
+        policy_cmp = policies[policy];
 
-	struct task *t = pendingq;
-	while (t) {
-		struct task *next = t->next;
-		policy_run(t);
-		t = next;
-	}
+        struct task *t = pendingq;
+        while (t) {
+            struct task *next = t->next;
+            policy_run(t);
+            t = next;
+        }
 
-	timer_init(1, tick_hnd);
+        timer_init(1, tick_hnd);
 
-	irq_disable();
+        irq_disable();
 
-	while (runq || waitq) {
-		current = runq;
-		if (current) {
-			runq = current->next;
-			current->next = current;
-		}
+        while (runq || waitq) {
+            current = runq;
+            if (current) {
+                runq = current->next;
+                current->next = current;
+            }
 
-		irq_enable();
-		if (current) {
-			current->entry(current->as);
-		} else {
-			pause();
-		}
-		irq_disable();
-	}
+            irq_enable();
+            if (current) {
+                current->entry(current->as);
+            } else {
+                pause();
+            }
+            irq_disable();
+        }
 
-	irq_enable();
-}
-
+        irq_enable();
+    }
