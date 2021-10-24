@@ -43,6 +43,11 @@ checkdifftimeout() {
 	checkpipe 124 0
 }
 
+checkfntimeout() {
+	< $1.in timeout 10 $MAIN | ./$1.fn
+	checkpipe 124 0
+}
+
 runtest() {
 	local r
 	cd $B/$1
