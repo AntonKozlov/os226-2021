@@ -40,21 +40,23 @@ static struct pool sched_node_pool = POOL_INITIALIZER_ARRAY(sched_node_array);
 
 // IRQ HANDLING
 
+static sigset_t irqs;
+
 void irq_disable(void) {
-    sigset_t sigset;
-    if (sigemptyset(&sigset) == -1 || sigaddset(&sigset, SIGALRM) == -1 ||
-        sigprocmask(SIG_BLOCK, &sigset, NULL) == -1) fprintf(stderr, "Failed to disable timer IRQ");
+    if (sigprocmask(SIG_BLOCK, &irqs, NULL) == -1) fprintf(stderr, "Failed to disable timer IRQ");
 }
 
 void irq_enable(void) {
-    sigset_t sigset;
-    if (sigemptyset(&sigset) == -1 || sigaddset(&sigset, SIGALRM) == -1 ||
-        sigprocmask(SIG_UNBLOCK, &sigset, NULL) == -1) fprintf(stderr, "Failed to enable timer IRQ");
+    if (sigprocmask(SIG_UNBLOCK, &irqs, NULL) == -1) fprintf(stderr, "Failed to enable timer IRQ");
 }
 
 // HELPER FUNCTIONS
 
-void add_task(struct sched_task task) {
+static void tick_hnd(void) {
+    time += TICK_PERIOD_MS;
+}
+
+static void add_task(struct sched_task task) {
     struct sched_node* node = pool_alloc(&sched_node_pool);
 
     if (node == NULL) {
@@ -67,7 +69,7 @@ void add_task(struct sched_task task) {
     sched_task_list.first = node;
 }
 
-void run_tasks(int (* is_preferable)(struct sched_task old_task, struct sched_task new_task)) {
+static void run_tasks(int (* is_preferable)(struct sched_task old_task, struct sched_task new_task)) {
     while (sched_task_list.first != NULL) {
         struct sched_node* prev = NULL, * node = NULL;
         for (struct sched_node* cur_prev = NULL, * cur_node = sched_task_list.first;
@@ -97,15 +99,15 @@ void run_tasks(int (* is_preferable)(struct sched_task old_task, struct sched_ta
     }
 }
 
-int is_preferable_by_fifo(struct sched_task old_task, struct sched_task new_task) {
+static int is_preferable_by_fifo(struct sched_task old_task, struct sched_task new_task) {
     return new_task.ready_time <= time;
 }
 
-int is_preferable_by_prio(struct sched_task old_task, struct sched_task new_task) {
+static int is_preferable_by_prio(struct sched_task old_task, struct sched_task new_task) {
     return new_task.ready_time <= time && new_task.priority >= old_task.priority;
 }
 
-int is_preferable_by_deadline(struct sched_task old_task, struct sched_task new_task) {
+static int is_preferable_by_deadline(struct sched_task old_task, struct sched_task new_task) {
     return new_task.ready_time <= time &&
            ((0 < new_task.deadline && (new_task.deadline < old_task.deadline || old_task.deadline <= 0)) ||
             (new_task.deadline == old_task.deadline && new_task.priority >= old_task.priority));
@@ -147,15 +149,12 @@ void sched_time_elapsed(unsigned amount) {
     irq_enable();
 }
 
-static void tick_hnd(void) {
-    time += TICK_PERIOD_MS;
-}
-
 long sched_gettime(void) {
     return time + timer_cnt() / 1000;
 }
 
 void sched_run(enum policy policy) {
+    if (sigemptyset(&irqs) == -1 || sigaddset(&irqs, SIGALRM) == -1) fprintf(stderr, "Failed to init timer IRQ");
     timer_init(TICK_PERIOD_MS, tick_hnd);
 
     irq_disable();

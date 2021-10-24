@@ -8,6 +8,14 @@
 
 #include "timer.h"
 
+static struct timeval init_interval;
+
+static void (* timer_hnd)(void);
+
+static void signal_hnd(int sig, siginfo_t* info, void* ctx) {
+    timer_hnd();
+}
+
 int timer_cnt(void) {
     struct itimerval timer_value;
 
@@ -32,14 +40,22 @@ int timer_cnt(void) {
 }
 
 void timer_init(int ms, void (* hnd)(void)) {
-    const struct timeval interval = {0, ms * 1000};
-    const struct itimerval timer_value = {interval, interval};
+    init_interval = (struct timeval) {0, ms * 1000};
+    timer_hnd = hnd;
+
+    const struct itimerval timer_value = {init_interval, init_interval};
+
+    struct sigaction act = {
+            .sa_sigaction = signal_hnd,
+            .sa_flags = SA_RESTART | SA_SIGINFO,
+    };
+    sigemptyset(&act.sa_mask);
 
     if (setitimer(ITIMER_REAL, &timer_value, NULL) == -1) {
         fprintf(stderr, "Failed to setup the timer");
     }
 
-    if (signal(SIGALRM, (__sighandler_t) hnd) == SIG_ERR) {
+    if (sigaction(SIGALRM, &act, NULL) == -1) {
         fprintf(stderr, "Failed to setup a handler for the timer");
     }
 }
