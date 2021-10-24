@@ -1,8 +1,8 @@
-CFLAGS = -g
+CFLAGS = -g -MMD -MT $@ -MF $@.d
 
 all : main
 
-main : $(patsubst %.c,%.o,$(wildcard *.c))
+main : $(patsubst %.c,%.o,$(patsubst %.S,%.o,$(wildcard *.[cS])))
 	$(CC) $(LDFLAGS) $^ $(LOADLIBES) $(LDLIBS) -o $@
 
 test : main
@@ -14,3 +14,5 @@ try : main
 
 clean :
 	$(RM) *.o main
+
+-include $(patsubst %,%.d,$(OBJ))

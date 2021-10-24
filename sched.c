@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 
+#include <limits.h>
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -8,163 +9,203 @@
 #include "sched.h"
 #include "timer.h"
 #include "pool.h"
+#include "ctx.h"
 
-#define TIME_PERIOD_MS 1
+/* AMD64 Sys V ABI, 3.2.2 The Stack Frame:
+The 128-byte area beyond the location pointed to by %rsp is considered to
+be reserved and shall not be modified by signal or interrupt handlers */
+#define SYSV_REDST_SZ 128
 
-static int time = 0;
+#define TICK_PERIOD 100
 
-void irq_disable(void) {
-    sigset_t sigset;
-    if (sigemptyset(&sigset) || sigaddset(&sigset, SIGALRM) || sigprocmask(SIG_BLOCK, &sigset, NULL))
-        fprintf(stderr, "irq_disable() error");
-}
-
-void irq_enable(void) {
-    sigset_t sigset;
-    if (sigemptyset(&sigset) || sigaddset(&sigset, SIGALRM) || sigprocmask(SIG_UNBLOCK, &sigset, NULL))
-        fprintf(stderr, "irq_enable() error");
-}
-
-static void tick_hnd(void) {
-    time += TIME_PERIOD_MS;
-}
-
-long sched_gettime(void) {
-    return time + timer_cnt() / 1000;
-}
+extern void tramptramp(void);
 
 struct task {
-    void (*entrypoint)(void *);
+    char stack[8192];
+    struct ctx ctx;
 
-    void *aspace;
+    void (*entry)(void *as);
+
+    void *as;
     int priority;
-    int deadline;
+
+    // timeout support
     int waketime;
+
+    // policy support
     struct task *next;
 } task_array[16];
 
-struct task_list {
-    struct task *first;
-} task_list = {NULL};
+static int time = 0;
 
-#define POLICY_X(X) \
-        X(policy_fifo) \
-        X(policy_prio) \
-        X(policy_deadline)
+static int current_start;
+static struct task *current;
+static struct task *idle;
+static struct task *runq;
+static struct task *waitq;
 
-#define DECLARE(X) extern struct task *X(struct task *chosen_task, struct task *next_task);
+static struct task *pendingq;
+static struct task *lastpending;
 
-POLICY_X(DECLARE)
+static int (*policy_cmp)(struct task *t1, struct task *t2);
 
-#undef DECLARE
-#undef POLICY_X
+static struct pool taskpool = POOL_INITIALIZER_ARRAY(task_array);
 
-void run_tasks(struct task *(*)(struct task *, struct task *));
+static sigset_t irqs;
 
-struct task *current = NULL;
-
-struct pool task_pool = POOL_INITIALIZER_ARRAY(task_array)
-
-void add_task(void (*entrypoint)(void *),
-              void *aspace,
-              int priority,
-              int deadline,
-              int timeout
-) {
-    struct task *task = pool_alloc(&task_pool);
-    task->entrypoint = entrypoint;
-    task->aspace = aspace;
-    task->priority = priority;
-    task->deadline = deadline;
-    task->waketime = timeout;
-    task->next = task_list.first;
-    task_list.first = task;
+void irq_disable(void) {
+    sigprocmask(SIG_BLOCK, &irqs, NULL);
 }
 
-void delete_task() {
-    if (current == NULL) return;
-    if (current == task_list.first) {
-        task_list.first = current->next;
+void irq_enable(void) {
+    sigprocmask(SIG_UNBLOCK, &irqs, NULL);
+}
+
+static void policy_run(struct task *t) {
+    struct task **c = &runq;
+
+    while (*c && (t == idle || policy_cmp(*c, t) <= 0)) {
+        c = &(*c)->next;
+    }
+    t->next = *c;
+    *c = t;
+}
+
+static void doswitch(void) {
+    struct task *old = current;
+    current = runq;
+    runq = current->next;
+
+    current_start = sched_gettime(); //TODO
+    ctx_switch(&old->ctx, &current->ctx);
+}
+
+static void tasktramp(void) { // TODO
+}
+
+void sched_new(void (*entrypoint)(void *aspace),
+               void *aspace,
+               int priority) {
+
+    struct task *t = pool_alloc(&taskpool);
+    t->entry = entrypoint;
+    t->as = aspace;
+    t->priority = priority;
+    t->next = NULL;
+
+    ctx_make(&t->ctx, tasktramp, t->stack, sizeof(t->stack));
+
+    if (!lastpending) {
+        lastpending = t;
+        pendingq = t;
     } else {
-        struct task *prev;
-        for (prev = task_list.first; prev->next != current; prev = prev->next);
-        prev->next = current->next;
+        lastpending->next = t;
+        lastpending = t;
     }
 }
 
-void sched_new(void (*entrypoint)(void *),
-               void *aspace,
-               int priority,
-               int deadline
-) {
-    add_task(entrypoint, aspace, priority, deadline, time);
+void sched_sleep(unsigned ms) {
+
+    if (!ms) {
+        irq_disable();
+        policy_run(current);
+        doswitch();
+        irq_enable();
+        return;
+    }
+
+    current->waketime = sched_gettime() + ms;
+
+    int curtime; //TODO
+    while ((curtime = sched_gettime()) < current->waketime) {
+        irq_disable();
+        struct task **c = &waitq;
+        while (*c && (*c)->waketime < current->waketime) {
+            c = &(*c)->next;
+        }
+        current->next = *c;
+        *c = current;
+
+        doswitch();
+        irq_enable();
+    }
 }
 
-void sched_cont(void (*entrypoint)(void *),
-                void *aspace,
-                int timeout) {
-    irq_disable();
-    if (current != NULL) add_task(entrypoint, aspace, current->priority, current->deadline, time + timeout);
-    irq_enable();
+static int fifo_cmp(struct task *t1, struct task *t2) {
+    return -1;
+}
+
+static int prio_cmp(struct task *t1, struct task *t2) {
+    return t2->priority - t1->priority;
+}
+
+static void hctx_push(greg_t *regs, unsigned long val) {
+    regs[REG_RSP] -= sizeof(unsigned long);
+    *(unsigned long *) regs[REG_RSP] = val;
+}
+
+static void bottom(void) {
+    time += TICK_PERIOD;
+}
+
+static void top(int sig, siginfo_t *info, void *ctx) {
+    ucontext_t *uc = (ucontext_t *) ctx;
+    greg_t *regs = uc->uc_mcontext.gregs;
+
+    unsigned long oldsp = regs[REG_RSP];
+    regs[REG_RSP] -= SYSV_REDST_SZ;
+    hctx_push(regs, regs[REG_RIP]);
+    hctx_push(regs, sig);
+    hctx_push(regs, regs[REG_RBP]);
+    hctx_push(regs, oldsp);
+    hctx_push(regs, (unsigned long) bottom);
+    regs[REG_RIP] = (greg_t) tramptramp;
+}
+
+long sched_gettime(void) {
+    int cnt1 = timer_cnt() / 1000;
+    int time1 = time;
+    int cnt2 = timer_cnt() / 1000;
+    int time2 = time;
+
+    return (cnt1 <= cnt2) ?
+           time1 + cnt2 :
+           time2 + cnt2;
 }
 
 void sched_run(enum policy policy) {
-    timer_init(TIME_PERIOD_MS, tick_hnd);
-    irq_disable();
-    if (policy == POLICY_FIFO) run_tasks(policy_fifo);
-    else if (policy == POLICY_PRIO) run_tasks(policy_prio);
-    else if (policy == POLICY_DEADLINE) run_tasks(policy_deadline);
-    irq_enable();
-}
+    int (*policies[])(struct task *t1, struct task *t2) = {fifo_cmp, prio_cmp};
+    policy_cmp = policies[policy];
 
-void sched_time_elapsed(unsigned amount) {
-    irq_disable();
-    int endtime = time + (int) amount;
-    while (time < endtime) {
-        irq_enable();
-        pause();
-        irq_disable();
+    struct task *t = pendingq;
+    while (t) {
+        struct task *next = t->next;
+        policy_run(t);
+        t = next;
     }
-    irq_enable();
-}
 
-void run_tasks(struct task *(*policy)(struct task *, struct task *)) {
-    while (task_list.first != NULL) {
-        struct task *chosen_task = task_list.first, *next_task = chosen_task->next;
-        for (; next_task != NULL; next_task = next_task->next)
-            chosen_task = policy(chosen_task, next_task);
-        if (chosen_task->waketime > time) {
-            irq_enable();
-            pause();
-            irq_disable();
-            continue;
+    sigemptyset(&irqs);
+    sigaddset(&irqs, SIGALRM);
+
+    timer_init(TICK_PERIOD, top);
+
+    irq_disable();
+
+    idle = pool_alloc(&taskpool);
+
+    current = idle;
+
+    sigset_t none;
+    sigemptyset(&none);
+
+    while (runq || waitq) {
+        if (runq) {
+            policy_run(current);
+            doswitch();
+        } else {
+            sigsuspend(&none);
         }
-        current = chosen_task;
 
-        irq_enable();
-        current->entrypoint(current->aspace);
-        irq_disable();
-
-        delete_task();
-
-        pool_free(&task_pool, current);
-        current = NULL;
     }
-}
-
-struct task *policy_fifo(struct task *chosen_task, struct task *next_task) {
-    return (next_task->waketime > time) ? chosen_task : next_task;
-}
-
-struct task *policy_prio(struct task *chosen_task, struct task *next_task) {
-    if (next_task->waketime > time) return chosen_task;
-    return (chosen_task->waketime <= time && chosen_task->priority > next_task->priority) ?
-           chosen_task : next_task;
-}
-
-struct task *policy_deadline(struct task *chosen_task, struct task *next_task) {
-    return next_task->waketime <= time &&
-           ((0 < next_task->deadline && (next_task->deadline < chosen_task->deadline || chosen_task->deadline <= 0)) ||
-            (next_task->deadline == chosen_task->deadline && next_task->priority >= chosen_task->priority)) ? next_task
-                                                                                                            : chosen_task;
+    irq_enable();
 }
