@@ -1,5 +1,0 @@
-# 	entryid	cnt	prio	deadline
-coapp	1	4	2	0
-coapp	2	16	0	0
-
-cosched 1

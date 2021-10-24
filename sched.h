@@ -17,16 +17,10 @@ enum policy {
 // Add new task
 extern void sched_new(void (*entrypoint)(void *ctx), // entrypoint function
 		void *ctx,     // context of the process
-		int priority,  // priority, [0 - 10], bigger for more priority
-		int deadline); // absolute time till the task should be completed, <=0 for no deadline
+		int priority); // priority, [0 - 10], bigger for more priority
 
-// Continue process from function after some amount of time
-extern void sched_cont(void (*entrypoint)(void *aspace), // entrypoint function
-		void *aspace,// addresses the process can access
-		int timeout); // when the continuation became runnable
-
-// Notify scheduler that some amount of time passed
-extern void sched_time_elapsed(unsigned amount);
+// Pause execution for specified amount of msec
+extern void sched_sleep(unsigned ms);
 
 // Scheduler loop, start executing tasks until all of them finish
 extern void sched_run(enum policy policy);
@@ -37,3 +31,4 @@ extern long sched_gettime(void);
 // DANGEROUS: only for tests
 extern void irq_disable(void);
 extern void irq_enable(void);
+
