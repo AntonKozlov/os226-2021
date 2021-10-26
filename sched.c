@@ -149,16 +149,23 @@ static void hctx_push(greg_t *regs, unsigned long val) {
 
 static void bottom(void) {
         time += TICK_PERIOD;
-	
-	policy_run(current);
-	while (waitq != NULL) {
-		if (waitq->waketime <= time) {
-			struct task *t = waitq;
-			waitq = waitq->next;
-			policy_run(t);
-		}
-		else break;
-	}
+
+	    irq_disable();
+
+		policy_run(current);
+
+		while (waitq != NULL) {
+			if (waitq->waketime <= sched_gettime()) {
+				struct task *t = waitq;
+				waitq = waitq->next;
+				policy_run(t);
+			}
+			else break;
+		}	
+
+		doswitch();
+
+		irq_enable();
 }
 
 static void top(int sig, siginfo_t *info, void *ctx) {
