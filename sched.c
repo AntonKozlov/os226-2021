@@ -76,11 +76,14 @@ static void doswitch(void) {
     current = runq;
     runq = current->next;
 
-    current_start = sched_gettime(); //TODO
+    current_start = sched_gettime();
     ctx_switch(&old->ctx, &current->ctx);
 }
 
-static void tasktramp(void) { // TODO
+static void tasktramp(void) {
+    irq_enable();
+    current->entry(current->as);
+    irq_disable();
 }
 
 void sched_new(void (*entrypoint)(void *aspace),
@@ -116,7 +119,7 @@ void sched_sleep(unsigned ms) {
 
     current->waketime = sched_gettime() + ms;
 
-    int curtime; //TODO
+    int curtime;
     while ((curtime = sched_gettime()) < current->waketime) {
         irq_disable();
         struct task **c = &waitq;
@@ -146,6 +149,18 @@ static void hctx_push(greg_t *regs, unsigned long val) {
 
 static void bottom(void) {
     time += TICK_PERIOD;
+
+    irq_disable();
+    policy_run(current);
+    const long cur_time = sched_gettime();
+    struct task **c = &waitq;
+    while (*c && (*c)->waketime <= cur_time) {
+        policy_run(*c);
+        c = &(*c)->next;
+    }
+
+    doswitch();
+    irq_enable();
 }
 
 static void top(int sig, siginfo_t *info, void *ctx) {
