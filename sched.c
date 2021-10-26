@@ -149,6 +149,15 @@ static void hctx_push(greg_t *regs, unsigned long val) {
 
 static void bottom(void) {
         time += TICK_PERIOD;
+	
+	while (waitq != NULL) {
+		if (waitq->waketime <= time) {
+			struct task *t = waitq;
+			waitq = waitq->next;
+			policy_run(t);
+		}
+		else break;
+	}
 }
 
 static void top(int sig, siginfo_t *info, void *ctx) {
