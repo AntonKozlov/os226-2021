@@ -155,8 +155,9 @@ static void bottom(void) {
         policy_run(current);
         const long cur_time = sched_gettime();
         while (waitq != NULL && waitq->waketime <= cur_time) {
-            policy_run(waitq);
+            struct task *t = waitq;
             waitq = waitq->next;
+            policy_run(t);
         }
         doswitch();
 
