@@ -151,7 +151,8 @@ static void bottom(void) {
         time += TICK_PERIOD;
         irq_disable();
         policy_run(current);
-        while (waitq != NULL && waitq->waketime <= sched_gettime()) {
+        long sched_time = sched_gettime();
+        while (waitq != NULL && waitq->waketime <= sched_time) {
                 struct task *t = waitq;
                 waitq = waitq->next;
                 policy_run(t);
