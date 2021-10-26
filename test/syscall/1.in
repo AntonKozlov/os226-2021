@@ -1,0 +1,5 @@
+syscalltest hello
+retcode
+
+syscalltest people!
+retcode
