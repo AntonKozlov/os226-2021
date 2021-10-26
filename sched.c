@@ -62,6 +62,7 @@ void irq_enable(void) {
     if (sigprocmask(SIG_UNBLOCK, &irqs, NULL) == -1) fprintf(stderr, "Failed to enable timer IRQ");
 }
 
+// Adds the task to the run queue
 static void policy_run(struct task* t) {
     struct task** c = &runq;
 
@@ -70,6 +71,7 @@ static void policy_run(struct task* t) {
     *c = t;
 }
 
+// Updates current task with a task from the run queue and switches the context
 static void doswitch(void) {
     struct task* old = current;
     current = runq;
@@ -79,9 +81,14 @@ static void doswitch(void) {
     ctx_switch(&old->ctx, &current->ctx);
 }
 
+// Runs the current task
 static void tasktramp(void) {
+    irq_enable();
+    current->entry(current->as);
+    irq_disable();
 }
 
+// Creates context for the task and adds it to the pending queue
 void sched_new(void (* entrypoint)(void* aspace), void* aspace, int priority) {
     struct task* t = pool_alloc(&taskpool);
     *t = (struct task) {.entry = entrypoint, .as = aspace, .priority = priority, .next = NULL};
@@ -136,6 +143,21 @@ static void hctx_push(greg_t* regs, unsigned long val) {
 
 static void bottom(void) {
     time += TICK_PERIOD;
+
+    irq_disable();
+
+    policy_run(current);
+
+    const long cur_time = sched_gettime();
+    struct task** c = &waitq;
+    while (*c != NULL && (*c)->waketime <= cur_time) {
+        policy_run(*c);
+        c = &(*c)->next;
+    }
+
+    doswitch();
+
+    irq_enable();
 }
 
 static void top(int sig, siginfo_t* info, void* ctx) {
