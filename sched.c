@@ -81,6 +81,9 @@ static void doswitch(void) {
 }
 
 static void tasktramp(void) {
+	irq_enable();
+	current->entry(current->as);
+	irq_disable();
 }
 
 void sched_new(void (*entrypoint)(void *aspace),
