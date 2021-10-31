@@ -1,28 +1,46 @@
 #define _GNU_SOURCE
 
+#include <stdint.h>
+#include <stdlib.h>
 #include <limits.h>
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
+#include <sys/mman.h>
 
 #include "sched.h"
 #include "timer.h"
 #include "pool.h"
 #include "ctx.h"
+#include "syscall.h"
 
 /* AMD64 Sys V ABI, 3.2.2 The Stack Frame:
-The 128-byte area beyond the location pointed to by %rsp is considered to
-be reserved and shall not be modified by signal or interrupt handlers */
+   The 128-byte area beyond the location pointed to by %rsp is considered to
+   be reserved and shall not be modified by signal or interrupt handlers */
 #define SYSV_REDST_SZ 128
 
 #define TICK_PERIOD 100
 
+#define MEM_PAGES 1024
+#define PAGE_SIZE 4096
+
+#define USER_PAGES 1024
+#define USER_START ((void*)0x400000)
+#define USER_STACK_PAGES 2
+
+extern int shell(int argc, char* argv[]);
+
 extern void tramptramp(void);
+
+struct vmctx {
+    unsigned int map[USER_PAGES];
+};
 
 struct task {
     char stack[8192];
     struct ctx ctx;
+    struct vmctx vm;
 
     void (* entry)(void* as);
 
@@ -38,7 +56,7 @@ struct task {
 
 static int time;
 
-static int current_start;
+static unsigned int current_start;
 static struct task* current;
 static struct task* idle;
 static struct task* runq;
@@ -54,12 +72,19 @@ static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
 
 static sigset_t irqs;
 
+static int memfd = -1;
+static unsigned long bitmap_pages[MEM_PAGES / sizeof(unsigned long) * CHAR_BIT];
+
 void irq_disable(void) {
     if (sigprocmask(SIG_BLOCK, &irqs, NULL) == -1) fprintf(stderr, "Failed to disable timer IRQ");
 }
 
 void irq_enable(void) {
     if (sigprocmask(SIG_UNBLOCK, &irqs, NULL) == -1) fprintf(stderr, "Failed to enable timer IRQ");
+}
+
+static int bitmap_alloc(unsigned long* bitmap, size_t size) {
+    return -1;
 }
 
 // Adds the task to the run queue
@@ -71,13 +96,25 @@ static void policy_run(struct task* t) {
     *c = t;
 }
 
-// Updates current task with a task from the run queue and switches the context
+static void vmctx_make(struct vmctx* vm, size_t stack_size) {
+    memset(vm->map, -1, sizeof(vm->map));
+    for (int i = 0; i < stack_size / PAGE_SIZE; i++) {
+        int mempage = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
+        if (mempage == -1) abort();
+        vm->map[USER_PAGES - 1 - i] = mempage;
+    }
+}
+
+static void vmctx_apply(struct vmctx* vm) {
+}
+
 static void doswitch(void) {
     struct task* old = current;
     current = runq;
     runq = current->next;
 
-    current_start = (int) sched_gettime();
+    current_start = sched_gettime();
+    vmctx_apply(&current->vm);
     ctx_switch(&old->ctx, &current->ctx);
 }
 
@@ -86,6 +123,15 @@ static void tasktramp(void) {
     irq_enable();
     current->entry(current->as);
     irq_disable();
+    doswitch();
+}
+
+static void tasktramp0(void) {
+    struct ctx dummy, new;
+    vmctx_apply(&current->vm);
+    ctx_make(&new, tasktramp, USER_START + (USER_PAGES - USER_STACK_PAGES) * PAGE_SIZE,
+             USER_STACK_PAGES * PAGE_SIZE);
+    ctx_switch(&dummy, &new);
 }
 
 // Creates context for the task and adds it to the pending queue
@@ -93,7 +139,8 @@ void sched_new(void (* entrypoint)(void* aspace), void* aspace, int priority) {
     struct task* t = pool_alloc(&taskpool);
     *t = (struct task) {.entry = entrypoint, .as = aspace, .priority = priority, .next = NULL};
 
-    ctx_make(&(t->ctx), tasktramp, t->stack, sizeof(t->stack));
+    vmctx_make(&t->vm, 8192);
+    ctx_make(&t->ctx, tasktramp0, t->stack, sizeof(t->stack));
 
     if (lastpending == NULL) {
         lastpending = t;
@@ -144,20 +191,18 @@ static void hctx_push(greg_t* regs, unsigned long val) {
 static void bottom(void) {
     time += TICK_PERIOD;
 
-    irq_disable();
-
-    policy_run(current);
-
-    const long cur_time = sched_gettime();
-    struct task** c = &waitq;
-    while (*c != NULL && (*c)->waketime <= cur_time) {
-        policy_run(*c);
-        c = &(*c)->next;
+    while (waitq != NULL && waitq->waketime <= sched_gettime()) {
+        struct task* t = waitq;
+        waitq = waitq->next;
+        policy_run(t);
     }
 
-    doswitch();
-
-    irq_enable();
+    if (TICK_PERIOD <= sched_gettime() - current_start) {
+        irq_disable();
+        policy_run(current);
+        doswitch();
+        irq_enable();
+    }
 }
 
 static void top(int sig, siginfo_t* info, void* ctx) {
@@ -167,20 +212,14 @@ static void top(int sig, siginfo_t* info, void* ctx) {
     unsigned long oldsp = regs[REG_RSP];
     regs[REG_RSP] -= SYSV_REDST_SZ;
     hctx_push(regs, regs[REG_RIP]);
-    hctx_push(regs, sig);
-    hctx_push(regs, regs[REG_RBP]);
     hctx_push(regs, oldsp);
+    hctx_push(regs, (unsigned long) (current->stack + sizeof(current->stack) - 16));
     hctx_push(regs, (unsigned long) bottom);
     regs[REG_RIP] = (greg_t) tramptramp;
 }
 
 long sched_gettime(void) {
-    int cnt1 = timer_cnt() / 1000;
-    int time1 = time;
-    int cnt2 = timer_cnt() / 1000;
-    int time2 = time;
-
-    return (cnt1 <= cnt2) ? time1 + cnt2 : time2 + cnt2;
+    return time + timer_cnt() / 1000;
 }
 
 void sched_run(enum policy policy) {
@@ -202,6 +241,7 @@ void sched_run(enum policy policy) {
     irq_disable();
 
     idle = pool_alloc(&taskpool);
+    memset(&idle->vm.map, -1, sizeof(idle->vm.map));
 
     current = idle;
 
@@ -216,4 +256,44 @@ void sched_run(enum policy policy) {
     }
 
     irq_enable();
+}
+
+static void sighnd(int sig, siginfo_t* info, void* ctx) {
+    ucontext_t* uc = (ucontext_t*) ctx;
+    greg_t* regs = uc->uc_mcontext.gregs;
+
+    uint16_t insn = *(uint16_t*) regs[REG_RIP];
+    if (insn != 0x81cd) abort();
+
+    regs[REG_RAX] = (greg_t) syscall_do((int) regs[REG_RAX], regs[REG_RBX],
+                                        regs[REG_RCX], regs[REG_RDX],
+                                        regs[REG_RSI], (void*) regs[REG_RDI]);
+
+    regs[REG_RIP] += 2;
+}
+
+int main(int argc, char* argv[]) {
+    struct sigaction act = {
+            .sa_sigaction = sighnd,
+            .sa_flags = SA_RESTART,
+    };
+    sigemptyset(&act.sa_mask);
+
+    if (sigaction(SIGSEGV, &act, NULL) == -1) {
+        perror("signal set failed");
+        return 1;
+    }
+
+    memfd = memfd_create("mem", 0);
+    if (memfd < 0) {
+        perror("memfd_create");
+        return 1;
+    }
+
+    if (ftruncate(memfd, PAGE_SIZE * MEM_PAGES) < 0) {
+        perror("ftrucate");
+        return 1;
+    }
+
+    shell(0, NULL);
 }

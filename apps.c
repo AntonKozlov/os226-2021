@@ -120,8 +120,8 @@ static void print(struct app_ctx* ctx, const char* msg) {
     static long refstart;
     if (refstart == 0) refstart = reftime();
 
-    printf("%16s id %ld cnt %d time %ld reftime %ld\n",
-           msg, 1 + ctx - ctxarray, ctx->cnt, sched_gettime(), reftime() - refstart);
+    printf("%16s id %ld cnt %d time %ld reftime %ld ctx %p\n",
+           msg, 1 + ctx - ctxarray, ctx->cnt, sched_gettime(), reftime() - refstart, &ctx);
 
     fflush(stdout);
 }
@@ -130,7 +130,7 @@ static void app_burn(void* _ctx) {
     struct app_ctx* ctx = _ctx;
     while (1) {
         print(ctx, "burn");
-        for (volatile int i = 100000 * ctx->cnt; i > 0; i--);
+        for (volatile int i = 10000000 * ctx->cnt; i > 0; i--);
     }
 }
 

@@ -19,8 +19,10 @@ tramptramp:
 	push %r15
 	/* FIXME vfp, xmm ...*/
 
-	mov %rsp, %rdi
-	call *15*8(%rsp)
+	mov %rsp, %rbx
+	mov 16*8(%rsp), %rsp
+	call *15*8(%rbx)
+	mov %rbx, %rsp
 
 	pop %r15
 	pop %r14
@@ -38,5 +40,5 @@ tramptramp:
 	pop %rax
 	popfq
 
-	mov 8(%rsp), %rsp
+	mov 2*8(%rsp), %rsp
 	jmp *-(128/*red_zone*/ + 8/*rip push*/)(%rsp)

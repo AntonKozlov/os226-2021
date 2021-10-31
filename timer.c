@@ -34,7 +34,7 @@ int timer_cnt(void) {
 }
 
 void timer_init(int ms, void (* hnd)(int sig, siginfo_t* info, void* ctx)) {
-    init_interval = (struct timeval) {0, ms * 1000};
+    init_interval = (struct timeval) {ms / 1000, (ms % 1000) * 1000};
 
     const struct itimerval timer_value = {init_interval, init_interval};
 
