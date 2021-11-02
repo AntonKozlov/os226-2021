@@ -12,6 +12,6 @@ test : all
 	./test/run.sh ; echo $$?
 
 clean :
-	rm -f *.o main
+	rm -f *.[od] main
 
 -include $(patsubst %,%.d,$(OBJ))

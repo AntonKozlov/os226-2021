@@ -1,1 +1,2 @@
-map_inputs checkfntimeout
+checkfntimeout 1
+checkfn 2
