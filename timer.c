@@ -22,7 +22,7 @@ int timer_cnt(void) {
 void timer_init(int ms, void (*hnd)(int sig, siginfo_t *info, void *ctx)) {
 
 	initv.tv_sec  = ms / 1000;
-	initv.tv_usec = ms * 1000;
+	initv.tv_usec = (ms % 1000) * 1000;
 
 	const struct itimerval setup_it = {
 		.it_value    = initv,

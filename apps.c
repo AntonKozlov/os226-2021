@@ -102,8 +102,8 @@ static void print(struct app_ctx *ctx, const char *msg) {
         refstart = reftime();
     }
 
-    printf("%16s id %ld cnt %d time %ld reftime %ld\n",
-           msg, 1 + ctx - ctxarray, ctx->cnt, sched_gettime(), reftime() - refstart);
+    printf("%16s id %d cnt %d time %ld reftime %ld ctx %p\n",
+           msg, 1 + ctx - ctxarray, ctx->cnt, sched_gettime(), reftime() - refstart, &ctx);
     fflush(stdout);
 }
 
@@ -111,16 +111,17 @@ static void app_burn(void *_ctx) {
     struct app_ctx *ctx = _ctx;
     while (1) {
         print(ctx, "burn");
-        for (volatile int i = 100000 * ctx->cnt; 0 < i; --i) {
+        for (volatile int i = 10000000 * ctx->cnt; 0 < i; --i) {
         }
     }
 }
 
 static void app_preempt_sleep(void *_ctx) {
     struct app_ctx *ctx = _ctx;
-    while (1) {
+    int cnt = ctx->cnt % 1000;
+    for (int i = 0; i < cnt; ++i) {
         print(ctx, "sleep");
-        sched_sleep(ctx->cnt);
+        sched_sleep(ctx->cnt - cnt);
     }
 }
 

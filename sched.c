@@ -1,28 +1,46 @@
 #define _GNU_SOURCE
 
+#include <stdint.h>
+#include <stdlib.h>
 #include <limits.h>
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
+#include <sys/mman.h>
 
 #include "sched.h"
 #include "timer.h"
 #include "pool.h"
 #include "ctx.h"
+#include "syscall.h"
 
 /* AMD64 Sys V ABI, 3.2.2 The Stack Frame:
-The 128-byte area beyond the location pointed to by %rsp is considered to
-be reserved and shall not be modified by signal or interrupt handlers */
+   The 128-byte area beyond the location pointed to by %rsp is considered to
+   be reserved and shall not be modified by signal or interrupt handlers */
 #define SYSV_REDST_SZ 128
 
 #define TICK_PERIOD 100
 
+#define MEM_PAGES 1024
+#define PAGE_SIZE 4096
+
+#define USER_PAGES 1024
+#define USER_START ((void*)0x400000)
+#define USER_STACK_PAGES 2
+
+extern int shell(int argc, char *argv[]);
+
 extern void tramptramp(void);
+
+struct vmctx {
+    unsigned map[USER_PAGES];
+};
 
 struct task {
     char stack[8192];
     struct ctx ctx;
+    struct vmctx vm;
 
     void (*entry)(void *as);
 
@@ -34,9 +52,9 @@ struct task {
 
     // policy support
     struct task *next;
-} task_array[16];
+};
 
-static int time = 0;
+static int time;
 
 static int current_start;
 static struct task *current;
@@ -49,9 +67,13 @@ static struct task *lastpending;
 
 static int (*policy_cmp)(struct task *t1, struct task *t2);
 
-static struct pool taskpool = POOL_INITIALIZER_ARRAY(task_array);
+static struct task taskarray[16];
+static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
 
 static sigset_t irqs;
+
+static int memfd = -1;
+static unsigned long bitmap_pages[MEM_PAGES / sizeof(unsigned long) * CHAR_BIT];
 
 void irq_disable(void) {
     sigprocmask(SIG_BLOCK, &irqs, NULL);
@@ -59,6 +81,10 @@ void irq_disable(void) {
 
 void irq_enable(void) {
     sigprocmask(SIG_UNBLOCK, &irqs, NULL);
+}
+
+static int bitmap_alloc(unsigned long *bitmap, size_t size) {
+    return -1;
 }
 
 static void policy_run(struct task *t) {
@@ -71,12 +97,27 @@ static void policy_run(struct task *t) {
     *c = t;
 }
 
+static void vmctx_make(struct vmctx *vm, size_t stack_size) {
+    memset(vm->map, -1, sizeof(vm->map));
+    for (int i = 0; i < stack_size / PAGE_SIZE; ++i) {
+        int mempage = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
+        if (mempage == -1) {
+            abort();
+        }
+        vm->map[USER_PAGES - 1 - i] = mempage;
+    }
+}
+
+static void vmctx_apply(struct vmctx *vm) {
+}
+
 static void doswitch(void) {
     struct task *old = current;
     current = runq;
     runq = current->next;
 
-    current_start = sched_gettime();
+    current_start = (int) sched_gettime();
+    vmctx_apply(&current->vm);
     ctx_switch(&old->ctx, &current->ctx);
 }
 
@@ -84,6 +125,15 @@ static void tasktramp(void) {
     irq_enable();
     current->entry(current->as);
     irq_disable();
+    doswitch();
+}
+
+static void tasktramp0(void) {
+    struct ctx dummy, new;
+    vmctx_apply(&current->vm);
+    ctx_make(&new, tasktramp, USER_START + (USER_PAGES - USER_STACK_PAGES) * PAGE_SIZE,
+             USER_STACK_PAGES * PAGE_SIZE);
+    ctx_switch(&dummy, &new);
 }
 
 void sched_new(void (*entrypoint)(void *aspace),
@@ -96,7 +146,8 @@ void sched_new(void (*entrypoint)(void *aspace),
     t->priority = priority;
     t->next = NULL;
 
-    ctx_make(&t->ctx, tasktramp, t->stack, sizeof(t->stack));
+    vmctx_make(&t->vm, 8192);
+    ctx_make(&t->ctx, tasktramp0, t->stack, sizeof(t->stack));
 
     if (!lastpending) {
         lastpending = t;
@@ -150,17 +201,18 @@ static void hctx_push(greg_t *regs, unsigned long val) {
 static void bottom(void) {
     time += TICK_PERIOD;
 
-    irq_disable();
-    policy_run(current);
-    const long cur_time = sched_gettime();
-    struct task **c = &waitq;
-    while (*c && (*c)->waketime <= cur_time) {
-        policy_run(*c);
-        c = &(*c)->next;
+    while (waitq && waitq->waketime <= sched_gettime()) {
+        struct task *t = waitq;
+        waitq = waitq->next;
+        policy_run(t);
     }
 
-    doswitch();
-    irq_enable();
+    if (TICK_PERIOD <= sched_gettime() - current_start) {
+        irq_disable();
+        policy_run(current);
+        doswitch();
+        irq_enable();
+    }
 }
 
 static void top(int sig, siginfo_t *info, void *ctx) {
@@ -170,9 +222,8 @@ static void top(int sig, siginfo_t *info, void *ctx) {
     unsigned long oldsp = regs[REG_RSP];
     regs[REG_RSP] -= SYSV_REDST_SZ;
     hctx_push(regs, regs[REG_RIP]);
-    hctx_push(regs, sig);
-    hctx_push(regs, regs[REG_RBP]);
     hctx_push(regs, oldsp);
+    hctx_push(regs, (unsigned long) (current->stack + sizeof(current->stack) - 16));
     hctx_push(regs, (unsigned long) bottom);
     regs[REG_RIP] = (greg_t) tramptramp;
 }
@@ -207,6 +258,7 @@ void sched_run(enum policy policy) {
     irq_disable();
 
     idle = pool_alloc(&taskpool);
+    memset(&idle->vm.map, -1, sizeof(idle->vm.map));
 
     current = idle;
 
@@ -222,5 +274,48 @@ void sched_run(enum policy policy) {
         }
 
     }
+
     irq_enable();
+}
+
+static void sighnd(int sig, siginfo_t *info, void *ctx) {
+    ucontext_t *uc = (ucontext_t *) ctx;
+    greg_t *regs = uc->uc_mcontext.gregs;
+
+    uint16_t insn = *(uint16_t *) regs[REG_RIP];
+    if (insn != 0x81cd) {
+        abort();
+    }
+
+    regs[REG_RAX] = (greg_t) syscall_do((int) regs[REG_RAX], regs[REG_RBX],
+                                        regs[REG_RCX], regs[REG_RDX],
+                                        regs[REG_RSI], (void *) regs[REG_RDI]);
+
+    regs[REG_RIP] += 2;
+}
+
+int main(int argc, char *argv[]) {
+    struct sigaction act = {
+            .sa_sigaction = sighnd,
+            .sa_flags = SA_RESTART,
+    };
+    sigemptyset(&act.sa_mask);
+
+    if (-1 == sigaction(SIGSEGV, &act, NULL)) {
+        perror("signal set failed");
+        return 1;
+    }
+
+    memfd = memfd_create("mem", 0);
+    if (memfd < 0) {
+        perror("memfd_create");
+        return 1;
+    }
+
+    if (ftruncate(memfd, PAGE_SIZE * MEM_PAGES) < 0) {
+        perror("ftrucate");
+        return 1;
+    }
+
+    shell(0, NULL);
 }

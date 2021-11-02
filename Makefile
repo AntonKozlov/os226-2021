@@ -1,4 +1,5 @@
 CFLAGS = -g -MMD -MT $@ -MF $@.d
+ASFLAGS = $(CFLAGS)
 
 all : main
 
