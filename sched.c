@@ -22,12 +22,12 @@
 
 #define TICK_PERIOD 100
 
-#define MEM_PAGES 1024
-#define PAGE_SIZE 4096
+#define MEM_PAGES 1024 // The number of pages in the physical memory
+#define PAGE_SIZE 4096 // Page size in bytes
 
-#define USER_PAGES 1024
-#define USER_START ((void*)0x400000)
-#define USER_STACK_PAGES 2
+#define USER_PAGES 1024 // The number of pages in the virtual memory
+#define USER_START ((void*)0x400000) // Starting address of the virtual memory
+#define USER_STACK_PAGES 2 // The number of pages occupied by the stack in the virtual memory
 
 extern int shell(int argc, char* argv[]);
 
@@ -54,7 +54,7 @@ struct task {
     struct task* next;
 };
 
-static int time;
+static int time = 0;
 
 static unsigned int current_start;
 static struct task* current;
@@ -72,8 +72,9 @@ static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
 
 static sigset_t irqs;
 
-static int memfd = -1;
-static unsigned long bitmap_pages[MEM_PAGES / sizeof(unsigned long) * CHAR_BIT];
+static int memfd = -1; // A file for virtual memory allocation
+static unsigned long bitmap_pages[MEM_PAGES / (sizeof(unsigned long) *
+                                               CHAR_BIT)]; // Bitmap representing the allocation status of the memory pages
 
 void irq_disable(void) {
     if (sigprocmask(SIG_BLOCK, &irqs, NULL) == -1) fprintf(stderr, "Failed to disable timer IRQ");
@@ -83,8 +84,23 @@ void irq_enable(void) {
     if (sigprocmask(SIG_UNBLOCK, &irqs, NULL) == -1) fprintf(stderr, "Failed to enable timer IRQ");
 }
 
+static void set_bit(unsigned long* array, size_t bit_num) {
+    array[bit_num / sizeof(unsigned long)] |= 1 << (bit_num % sizeof(unsigned long));
+}
+
+static int is_set_bit(const unsigned long* array, size_t bit_num) {
+    return (array[bit_num / sizeof(unsigned long)] & (1 << (bit_num % sizeof(unsigned long)))) != 0;
+}
+
+// Marks a page in the memfd as allocated and returns a pointer to it
 static int bitmap_alloc(unsigned long* bitmap, size_t size) {
-    return -1;
+    int bit_num;
+    for (bit_num = 0; is_set_bit(bitmap, bit_num) && bit_num < MEM_PAGES; bit_num++);
+    if (bit_num == MEM_PAGES) return -1;
+
+    set_bit(bitmap, bit_num);
+
+    return bit_num;
 }
 
 // Adds the task to the run queue
@@ -100,12 +116,29 @@ static void vmctx_make(struct vmctx* vm, size_t stack_size) {
     memset(vm->map, -1, sizeof(vm->map));
     for (int i = 0; i < stack_size / PAGE_SIZE; i++) {
         int mempage = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
-        if (mempage == -1) abort();
+        if (mempage == -1) {
+            perror("bitmap_alloc");
+            abort();
+        }
         vm->map[USER_PAGES - 1 - i] = mempage;
     }
 }
 
+// Applies the virtual memory mapping (switches the context)
 static void vmctx_apply(struct vmctx* vm) {
+    for (int i = 0; i < USER_PAGES; i++) {
+        if (vm->map[i] != -1) {
+            if (munmap(USER_START + i * PAGE_SIZE, PAGE_SIZE) == -1) {
+                perror("munmap");
+                abort();
+            }
+            if ((long) mmap(USER_START + i * PAGE_SIZE, PAGE_SIZE, PROT_EXEC | PROT_READ | PROT_WRITE,
+                            MAP_SHARED | MAP_FIXED_NOREPLACE, memfd, vm->map[i] * PAGE_SIZE) == -1L) {
+                perror("mmap");
+                abort();
+            }
+        }
+    }
 }
 
 static void doswitch(void) {
@@ -194,7 +227,9 @@ static void bottom(void) {
     while (waitq != NULL && waitq->waketime <= sched_gettime()) {
         struct task* t = waitq;
         waitq = waitq->next;
+        irq_disable();
         policy_run(t);
+        irq_enable();
     }
 
     if (TICK_PERIOD <= sched_gettime() - current_start) {
@@ -263,7 +298,10 @@ static void sighnd(int sig, siginfo_t* info, void* ctx) {
     greg_t* regs = uc->uc_mcontext.gregs;
 
     uint16_t insn = *(uint16_t*) regs[REG_RIP];
-    if (insn != 0x81cd) abort();
+    if (insn != 0x81cd) {
+        fprintf(stderr, "sighnd: received %x\n", insn);
+        abort();
+    }
 
     regs[REG_RAX] = (greg_t) syscall_do((int) regs[REG_RAX], regs[REG_RBX],
                                         regs[REG_RCX], regs[REG_RDX],
@@ -285,12 +323,12 @@ int main(int argc, char* argv[]) {
     }
 
     memfd = memfd_create("mem", 0);
-    if (memfd < 0) {
+    if (memfd == -1) {
         perror("memfd_create");
         return 1;
     }
 
-    if (ftruncate(memfd, PAGE_SIZE * MEM_PAGES) < 0) {
+    if (ftruncate(memfd, PAGE_SIZE * MEM_PAGES) == -1) {
         perror("ftrucate");
         return 1;
     }
