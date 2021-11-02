@@ -73,7 +73,7 @@ static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
 static sigset_t irqs;
 
 static int memfd = -1;
-static unsigned long bitmap_pages[MEM_PAGES / sizeof(unsigned long) * CHAR_BIT];
+static unsigned long bitmap_pages[MEM_PAGES / (sizeof(unsigned long) * CHAR_BIT)];
 
 void irq_disable(void) {
     sigprocmask(SIG_BLOCK, &irqs, NULL);
@@ -83,8 +83,23 @@ void irq_enable(void) {
     sigprocmask(SIG_UNBLOCK, &irqs, NULL);
 }
 
+static void set_bit(unsigned long *array, size_t bit_num) {
+    array[bit_num / sizeof(unsigned long)] |= 1 << (bit_num % sizeof(unsigned long));
+}
+
+static int find_unallocated_bit(const unsigned long *array) {
+    int bit = 0;
+    for (bit = 0;
+         (array[bit / sizeof(unsigned long)] &
+          (1 << (bit % sizeof(unsigned long)))) != 0 &&
+         bit < MEM_PAGES; bit++);
+    return bit == MEM_PAGES ? -1 : bit;
+}
+
 static int bitmap_alloc(unsigned long *bitmap, size_t size) {
-    return -1;
+    int bit = find_unallocated_bit(bitmap);
+    if (bit != -1) set_bit(bitmap, bit);
+    return bit;
 }
 
 static void policy_run(struct task *t) {
@@ -101,14 +116,21 @@ static void vmctx_make(struct vmctx *vm, size_t stack_size) {
     memset(vm->map, -1, sizeof(vm->map));
     for (int i = 0; i < stack_size / PAGE_SIZE; ++i) {
         int mempage = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
-        if (mempage == -1) {
-            abort();
-        }
+        if (mempage == -1) abort();
         vm->map[USER_PAGES - 1 - i] = mempage;
     }
 }
 
 static void vmctx_apply(struct vmctx *vm) {
+    for (int i = 0; i < USER_PAGES; i++) {
+        if (vm->map[i] != -1) {
+            if (munmap(USER_START + i * PAGE_SIZE, PAGE_SIZE) == -1)
+                abort();
+            if ((long) mmap(USER_START + i * PAGE_SIZE, PAGE_SIZE, PROT_READ | PROT_WRITE,
+                            MAP_SHARED | MAP_FIXED_NOREPLACE, memfd, vm->map[i] * PAGE_SIZE) == -1)
+                abort();
+        }
+    }
 }
 
 static void doswitch(void) {
