@@ -247,14 +247,12 @@ static void top(int sig, siginfo_t *info, void *ctx) {
 }
 
 long sched_gettime(void) {
-	int cnt1 = timer_cnt() / 1000;
-	int time1 = time;
-	int cnt2 = timer_cnt() / 1000;
-	int time2 = time;
-
-	return (cnt1 <= cnt2) ?
-		time1 + cnt2 :
-		time2 + cnt2;
+	while (true) {
+		int time1 = time;
+		int cnt = timer_cnt() / 1000;
+		int time2 = time;
+		if (time1 == time2) return time1 + cnt;
+	}
 }
 
 void sched_run(enum policy policy) {
