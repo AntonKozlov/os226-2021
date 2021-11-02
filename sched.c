@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <stdbool.h>
 
 #include "sched.h"
 #include "timer.h"
@@ -72,7 +73,7 @@ static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
 static sigset_t irqs;
 
 static int memfd = -1;
-static unsigned long bitmap_pages[MEM_PAGES / sizeof(unsigned long) * CHAR_BIT];
+static unsigned long bitmap_pages[MEM_PAGES / (sizeof(unsigned long) * CHAR_BIT)];
 
 void irq_disable(void) {
 	sigprocmask(SIG_BLOCK, &irqs, NULL);
@@ -83,6 +84,12 @@ void irq_enable(void) {
 }
 
 static int bitmap_alloc(unsigned long *bitmap, size_t size) {
+	for (size_t i = 0; i < size / sizeof(unsigned long); i++)
+		if (bitmap[i] != ~0ul) {
+			int bit_pos = ffsl(~bitmap[i]) - 1;
+			bitmap[i] |= 1ul << bit_pos;
+			return i * (sizeof(unsigned long) * CHAR_BIT) + bit_pos;
+		}
 	return -1;
 }
 
@@ -108,6 +115,18 @@ static void vmctx_make(struct vmctx *vm, size_t stack_size) {
 }
 
 static void vmctx_apply(struct vmctx *vm) {
+	for (int i = 0; i < USER_PAGES; i++)
+		if (vm->map[i] != -1) {
+			munmap(USER_START + i * PAGE_SIZE, PAGE_SIZE);
+			mmap(
+					USER_START + i * PAGE_SIZE,
+					PAGE_SIZE,
+					PROT_READ | PROT_WRITE,
+					MAP_SHARED,
+					memfd,
+					vm->map[i] * PAGE_SIZE
+			);
+		}
 }
 
 static void doswitch(void) {
