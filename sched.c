@@ -28,6 +28,7 @@
 #define USER_PAGES 1024
 #define USER_START ((void*)0x400000)
 #define USER_STACK_PAGES 2
+#define UNS_LONG_SIZE sizeof(unsigned long)
 
 extern int shell(int argc, char *argv[]);
 
@@ -72,7 +73,7 @@ static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
 static sigset_t irqs;
 
 static int memfd = -1;
-static unsigned long bitmap_pages[MEM_PAGES / sizeof(unsigned long) * CHAR_BIT];
+static unsigned long bitmap_pages[MEM_PAGES / (sizeof(unsigned long) * CHAR_BIT)];
 
 void irq_disable(void) {
 	sigprocmask(SIG_BLOCK, &irqs, NULL);
@@ -83,7 +84,11 @@ void irq_enable(void) {
 }
 
 static int bitmap_alloc(unsigned long *bitmap, size_t size) {
-	return -1;
+    int i;
+    for (i = 0; i < MEM_PAGES && ((bitmap[i / UNS_LONG_SIZE] & (1 << (i % UNS_LONG_SIZE))) != 0); i++);
+    if (i == MEM_PAGES) return -1;
+    bitmap[i / UNS_LONG_SIZE] |= 1 << (i % UNS_LONG_SIZE);
+	return i;
 }
 
 static void policy_run(struct task *t) {
@@ -108,6 +113,11 @@ static void vmctx_make(struct vmctx *vm, size_t stack_size) {
 }
 
 static void vmctx_apply(struct vmctx *vm) {
+    for (int i = 0; i < USER_PAGES; i++)
+        if (vm->map[i] != -1) {
+            munmap(USER_START + i * PAGE_SIZE, PAGE_SIZE);
+            mmap(USER_START + i * PAGE_SIZE, PAGE_SIZE,PROT_READ | PROT_WRITE, MAP_SHARED, memfd,vm->map[i] * PAGE_SIZE);
+        }
 }
 
 static void doswitch(void) {
@@ -228,14 +238,13 @@ static void top(int sig, siginfo_t *info, void *ctx) {
 }
 
 long sched_gettime(void) {
-	int cnt1 = timer_cnt() / 1000;
-	int time1 = time;
-	int cnt2 = timer_cnt() / 1000;
-	int time2 = time;
-
-	return (cnt1 <= cnt2) ?
-		time1 + cnt2 :
-		time2 + cnt2;
+    while (1) {
+        int time1 = time;
+        int cnt = timer_cnt() / 1000;
+        int time2 = time;
+        if (time1 != time2) continue;
+        return time1 + cnt;
+    }
 }
 
 void sched_run(enum policy policy) {
