@@ -125,7 +125,7 @@ static void vmctx_apply(struct vmctx *vm) {
     for (int i = 0; i < USER_PAGES; i++) {
         if (vm->map[i] != -1) {
             munmap(USER_START + i * PAGE_SIZE, PAGE_SIZE);
-            nmap(USER_START + i * PAGE_SIZE,
+            mmap(USER_START + i * PAGE_SIZE,
                  PAGE_SIZE,
                  PROT_READ | PROT_WRITE,
                  MAP_SHARED,
