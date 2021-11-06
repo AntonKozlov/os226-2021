@@ -108,12 +108,12 @@ static void print(struct app_ctx *ctx, const char *msg) {
 }
 
 static void app_burn(void *_ctx) {
-	struct app_ctx *ctx = _ctx;
-	while (1)  {
-		print(ctx, "burn");
-		for (volatile int i = 100000 * ctx->cnt; 0 < i; --i) {
-		}
-	}
+    struct app_ctx *ctx = _ctx;
+    while (1) {
+        print(ctx, "burn");
+        for (volatile int i = 100000 * ctx->cnt; 0 < i; --i) {
+        }
+    }
 }
 
 static void app_preempt_sleep(void *_ctx) {

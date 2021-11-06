@@ -14,10 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         test:
-          - batch
-          - pool
-          - syscall
-          - preempt
+          - exec
 
     steps:
     - uses: actions/checkout@v2
