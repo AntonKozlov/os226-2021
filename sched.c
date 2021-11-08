@@ -84,23 +84,24 @@ void irq_enable(void) {
     if (sigprocmask(SIG_UNBLOCK, &irqs, NULL) == -1) fprintf(stderr, "Failed to enable timer IRQ");
 }
 
-static void set_bit(unsigned long* array, size_t bit_num) {
-    array[bit_num / sizeof(unsigned long)] |= 1 << (bit_num % sizeof(unsigned long));
-}
-
-static int is_set_bit(const unsigned long* array, size_t bit_num) {
-    return (array[bit_num / sizeof(unsigned long)] & (1 << (bit_num % sizeof(unsigned long)))) != 0;
-}
-
 // Marks a page in the memfd as allocated and returns a pointer to it
 static int bitmap_alloc(unsigned long* bitmap, size_t size) {
-    int bit_num;
-    for (bit_num = 0; is_set_bit(bitmap, bit_num) && bit_num < MEM_PAGES; bit_num++);
-    if (bit_num == MEM_PAGES) return -1;
+    size_t n = size / sizeof(*bitmap);
+    unsigned long* bitmap_elem = NULL;
 
-    set_bit(bitmap, bit_num);
+    for (size_t i = 0; i < n; i++) {
+        if (bitmap[i] != -1) {
+            bitmap_elem = &bitmap[i];
+            break;
+        }
+    }
 
-    return bit_num;
+    if (bitmap_elem == NULL) return -1;
+
+    int bit_num = ffsl((long) *bitmap_elem + 1) - 1;
+    *bitmap_elem |= 1 << bit_num;
+
+    return (int) ((bitmap_elem - bitmap) * sizeof(unsigned long) * CHAR_BIT) + bit_num;
 }
 
 // Adds the task to the run queue
@@ -117,7 +118,7 @@ static void vmctx_make(struct vmctx* vm, size_t stack_size) {
     for (int i = 0; i < stack_size / PAGE_SIZE; i++) {
         int mempage = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
         if (mempage == -1) {
-            perror("bitmap_alloc");
+            fprintf(stderr, "bitmap_alloc failed");
             abort();
         }
         vm->map[USER_PAGES - 1 - i] = mempage;
@@ -126,17 +127,18 @@ static void vmctx_make(struct vmctx* vm, size_t stack_size) {
 
 // Applies the virtual memory mapping (switches the context)
 static void vmctx_apply(struct vmctx* vm) {
+    if (munmap(USER_START, USER_STACK_PAGES * PAGE_SIZE) == -1) { // TODO: fix len, use MAP_FIXED_NOREPLACE in mmap
+        perror("munmap");
+        abort();
+    }
+
     for (int i = 0; i < USER_PAGES; i++) {
-        if (vm->map[i] != -1) {
-            if (munmap(USER_START + i * PAGE_SIZE, PAGE_SIZE) == -1) {
-                perror("munmap");
-                abort();
-            }
-            if ((long) mmap(USER_START + i * PAGE_SIZE, PAGE_SIZE, PROT_EXEC | PROT_READ | PROT_WRITE,
-                            MAP_SHARED | MAP_FIXED_NOREPLACE, memfd, vm->map[i] * PAGE_SIZE) == -1L) {
-                perror("mmap");
-                abort();
-            }
+        if (vm->map[i] == -1) continue;
+
+        if (mmap(USER_START + i * PAGE_SIZE, PAGE_SIZE, PROT_EXEC | PROT_READ | PROT_WRITE,
+                 MAP_SHARED | MAP_FIXED, memfd, vm->map[i] * PAGE_SIZE) == MAP_FAILED) {
+            perror("mmap");
+            abort();
         }
     }
 }
