@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 name: Test os226
 
 on:
@@ -22,3 +23,26 @@ jobs:
     - uses: actions/checkout@v2
     - run: make
     - run: ./test/run.sh ${{matrix.test}}
+=======
+
+name: Test os226
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - exec
+
+    steps:
+    - uses: actions/checkout@v2
+    - run: make
+    - run: ./test/run.sh ${{matrix.test}}
+>>>>>>> 056075af091d07941e0d025cdd1392e260add4c3

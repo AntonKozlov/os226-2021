@@ -7,7 +7,9 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
+#include <elf.h>
 #include <sys/mman.h>
+#include <sys/fcntl.h>
 
 #include "sched.h"
 #include "timer.h"
@@ -26,7 +28,7 @@
 #define PAGE_SIZE 4096 // Page size in bytes
 
 #define USER_PAGES 1024 // The number of pages in the virtual memory
-#define USER_START ((void*)0x400000) // Starting address of the virtual memory
+#define USER_START ((void*)IUSERSPACE_START) // Starting address of the virtual memory
 #define USER_STACK_PAGES 2 // The number of pages occupied by the stack in the virtual memory
 
 extern int shell(int argc, char* argv[]);
@@ -34,13 +36,24 @@ extern int shell(int argc, char* argv[]);
 extern void tramptramp(void);
 
 struct vmctx {
-    unsigned int map[USER_PAGES];
+    unsigned map[USER_PAGES];
+    unsigned brk;
 };
 
 struct task {
     char stack[8192];
-    struct ctx ctx;
     struct vmctx vm;
+
+    union {
+        struct ctx ctx;
+
+        struct {
+            int (* main)(int, char**);
+
+            int argc;
+            char** argv;
+        };
+    };
 
     void (* entry)(void* as);
 
@@ -73,8 +86,9 @@ static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
 static sigset_t irqs;
 
 static int memfd = -1; // A file for virtual memory allocation
-static unsigned long bitmap_pages[MEM_PAGES / (sizeof(unsigned long) *
-                                               CHAR_BIT)]; // Bitmap representing the allocation status of the memory pages
+#define LONG_BITS (sizeof(unsigned long) * CHAR_BIT)
+static unsigned long bitmap_pages[
+        MEM_PAGES / LONG_BITS]; // Bitmap representing the allocation status of the memory pages
 
 void irq_disable(void) {
     if (sigprocmask(SIG_BLOCK, &irqs, NULL) == -1) fprintf(stderr, "Failed to disable timer IRQ");
@@ -96,12 +110,19 @@ static int bitmap_alloc(unsigned long* bitmap, size_t size) {
         }
     }
 
-    if (bitmap_elem == NULL) return -1;
+    if (bitmap_elem == NULL) {
+        fprintf(stderr, "cannot find free page\n");
+        abort();
+    }
 
     int bit_num = ffsl((long) *bitmap_elem + 1) - 1;
     *bitmap_elem |= 1 << bit_num;
 
-    return (int) ((bitmap_elem - bitmap) * sizeof(unsigned long) * CHAR_BIT) + bit_num;
+    return (int) ((bitmap_elem - bitmap) * LONG_BITS) + bit_num;
+}
+
+static void bitmap_free(unsigned long* bitmap, size_t size, unsigned v) {
+    bitmap[v / LONG_BITS] &= ~(1 << (v % LONG_BITS));
 }
 
 // Adds the task to the run queue
@@ -117,10 +138,6 @@ static void vmctx_make(struct vmctx* vm, size_t stack_size) {
     memset(vm->map, -1, sizeof(vm->map));
     for (int i = 0; i < stack_size / PAGE_SIZE; i++) {
         int mempage = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
-        if (mempage == -1) {
-            fprintf(stderr, "bitmap_alloc failed");
-            abort();
-        }
         vm->map[USER_PAGES - 1 - i] = mempage;
     }
 }
@@ -164,8 +181,7 @@ static void tasktramp(void) {
 static void tasktramp0(void) {
     struct ctx dummy, new;
     vmctx_apply(&current->vm);
-    ctx_make(&new, tasktramp, USER_START + (USER_PAGES - USER_STACK_PAGES) * PAGE_SIZE,
-             USER_STACK_PAGES * PAGE_SIZE);
+    ctx_make(&new, tasktramp, USER_START + USER_PAGES * PAGE_SIZE);
     ctx_switch(&dummy, &new);
 }
 
@@ -174,8 +190,8 @@ void sched_new(void (* entrypoint)(void* aspace), void* aspace, int priority) {
     struct task* t = pool_alloc(&taskpool);
     *t = (struct task) {.entry = entrypoint, .as = aspace, .priority = priority, .next = NULL};
 
-    vmctx_make(&t->vm, 8192);
-    ctx_make(&t->ctx, tasktramp0, t->stack, sizeof(t->stack));
+    vmctx_make(&t->vm, 4 * PAGE_SIZE);
+    ctx_make(&t->ctx, tasktramp0, t->stack + sizeof(t->stack));
 
     if (lastpending == NULL) {
         lastpending = t;
@@ -312,7 +328,72 @@ static void sighnd(int sig, siginfo_t* info, void* ctx) {
     regs[REG_RIP] += 2;
 }
 
+static int vmctx_brk(struct vmctx* vm, void* addr) {
+    long newbrk = (addr - USER_START + PAGE_SIZE - 1) / PAGE_SIZE;
+    if (newbrk < 0 || USER_PAGES <= newbrk) {
+        fprintf(stderr, "Out-of-mem\n");
+        abort();
+    }
+
+    for (unsigned int i = vm->brk; i < newbrk; i++) {
+        vm->map[i] = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
+    }
+    for (unsigned int i = newbrk; i < vm->brk; i++) {
+        bitmap_free(bitmap_pages, sizeof(bitmap_pages), vm->map[i]);
+    }
+    vm->brk = newbrk;
+
+    return 0;
+}
+
+int vmprotect(void* start, unsigned len, int prot) {
+#if 0
+    if (mprotect(start, len, prot) == -1) {
+        perror("mprotect");
+        return -1;
+    }
+#endif
+    return 0;
+}
+
+static void exectramp(void) {
+    irq_enable();
+    current->main(current->argc, current->argv);
+    irq_disable();
+    doswitch();
+}
+
+static int do_exec(const char* path, char* argv[]) {
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        perror("open");
+        return 1;
+    }
+
+    void* rawelf = mmap(NULL, 128 * 1024, PROT_READ, MAP_PRIVATE, fd, 0);
+
+    if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5) != 0) {
+        printf("ELF header mismatch\n");
+        return 1;
+    }
+
+    // https://linux.die.net/man/5/elf
+    //
+    // Find Elf64_Ehdr -- at the very start
+    //   Elf64_Phdr -- find one with PT_LOAD, load it for execution
+    //   Find entry point (e_entry)
+
+    return 0;
+}
+
+static void inittramp(void* arg) {
+    char* args = {NULL};
+    do_exec(arg, &args);
+}
+
 int main(int argc, char* argv[]) {
+    char* initpath = argv[1];
+
     struct sigaction act = {
             .sa_sigaction = sighnd,
             .sa_flags = SA_RESTART,
@@ -335,5 +416,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    shell(0, NULL);
+    sched_new(inittramp, initpath, 0);
+    sched_run(0);
 }

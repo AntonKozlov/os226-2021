@@ -1,8 +1,8 @@
-
 # artifacts
 *.o
 *.o.d
 /main
+*.app
 
 # IDE and tooling
 /.idea
