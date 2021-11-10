@@ -393,8 +393,8 @@ static int do_exec(const char *path, char *argv[]) {
 
 	Elf64_Ehdr eh;
 	Elf64_Phdr ph;
-	read(fd, &eh, sizeof(Elf64_Ehdr));
 	int prots[USER_PAGES];
+	read(fd, &eh, sizeof(Elf64_Ehdr));
 
 	for (Elf64_Half i = 0; i < eh.e_phnum; i++) {
 		lseek(fd, eh.e_phoff + i * sizeof(Elf64_Phdr), SEEK_SET);
