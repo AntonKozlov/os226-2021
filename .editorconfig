@@ -1,0 +1,14 @@
+# EditorConfig is awesome: http://EditorConfig.org
+
+root = true
+
+[*]
+end_of_line = lf
+# Do not trim everywhere: makefiles, configs are not usually follows this policy
+#trim_trailing_whitespace = true
+
+[c,h]
+indent_style = tab
+indent_size = 8
+trim_trailing_whitespace = true
+
