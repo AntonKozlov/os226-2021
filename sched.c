@@ -391,11 +391,51 @@ static int do_exec(const char *path, char *argv[]) {
 		return 1;
 	}
 
-	// https://linux.die.net/man/5/elf
-	//
-	// Find Elf64_Ehdr -- at the very start
-	//   Elf64_Phdr -- find one with PT_LOAD, load it for execution
-	//   Find entry point (e_entry)
+	Elf64_Ehdr eh;
+	Elf64_Phdr ph;
+	read(fd, &eh, sizeof(Elf64_Ehdr));
+	int prots[USER_PAGES];
+
+	for (Elf64_Half i = 0; i < eh.e_phnum; i++) {
+		lseek(fd, eh.e_phoff + i * sizeof(Elf64_Phdr), SEEK_SET);
+		read(fd, &ph, sizeof(Elf64_Phdr));
+		if (ph.p_type == PT_LOAD) {
+			unsigned int old_brk = current->vm.brk;
+			vmctx_brk(&current->vm, (void *) (ph.p_vaddr + ph.p_memsz));
+
+			int prot = (ph.p_flags & PF_X ? PROT_EXEC : 0) |
+					(ph.p_flags & PF_W ? PROT_WRITE : 0) |
+					(ph.p_flags & PF_R ? PROT_READ : 0);
+			for (unsigned int j = old_brk; j < current->vm.brk; j++) prots[j] = prot;
+
+			char page[PAGE_SIZE];
+			Elf64_Addr first_page = (ph.p_vaddr - (unsigned long) USER_START) / PAGE_SIZE;
+			Elf64_Xword page_cnt = ph.p_filesz / PAGE_SIZE;
+
+			lseek(fd, ph.p_offset, SEEK_SET);
+
+			for (Elf64_Xword j = 0; j < page_cnt; j++) {
+				read(fd, page, PAGE_SIZE);
+				lseek(memfd, PAGE_SIZE * current->vm.map[first_page + j], SEEK_SET);
+				write(memfd, page, PAGE_SIZE);
+			}
+
+			read(fd, page, ph.p_filesz % PAGE_SIZE);
+			lseek(memfd, PAGE_SIZE * current->vm.map[first_page + page_cnt], SEEK_SET);
+			write(memfd, page, ph.p_filesz % PAGE_SIZE);
+		}
+	}
+	lseek(memfd, 0, SEEK_SET);
+	struct ctx old, new;
+	vmctx_apply(&current->vm);
+
+	for (unsigned int i = 0; i < current->vm.brk; i++) vmprotect(USER_START, PAGE_SIZE, prots[i]);
+
+	current->main = (int (*)(int, char **)) eh.e_entry;
+	ctx_make(&new, exectramp, USER_START + USER_PAGES * PAGE_SIZE);
+	ctx_switch(&old, &new);
+
+	return 0;
 }
 
 static void inittramp(void* arg) {
