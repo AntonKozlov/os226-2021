@@ -398,49 +398,48 @@ static int do_exec(const char *path, char *argv[]) {
 	//   Find entry point (e_entry)
 
     Elf64_Ehdr eh;
-    Elf64_Phdr ph;
-    read(fd, &eh, sizeof(Elf64_Ehdr));
     int prots[USER_PAGES];
+    read(fd, &eh, sizeof(Elf64_Ehdr));
 
     for (Elf64_Half i = 0; i < eh.e_phnum; i++) {
         lseek(fd, eh.e_phoff + i * sizeof(Elf64_Phdr), SEEK_SET);
+        Elf64_Phdr ph;
         read(fd, &ph, sizeof(Elf64_Phdr));
-        if (ph.p_type == PT_LOAD) {
-            unsigned int old_brk = current->vm.brk;
-            vmctx_brk(&current->vm, (void *) (ph.p_vaddr + ph.p_memsz));
+        if (ph.p_type != PT_LOAD) continue;
 
-            int prot = (ph.p_flags & PF_X ? PROT_EXEC : 0) |
-                       (ph.p_flags & PF_W ? PROT_WRITE : 0) |
-                       (ph.p_flags & PF_R ? PROT_READ : 0);
-            for (unsigned int j = old_brk; j < current->vm.brk; j++) prots[j] = prot;
+        unsigned int old_brk = current->vm.brk;
+        vmctx_brk(&current->vm, (void *) (ph.p_vaddr + ph.p_memsz));
 
-            char page[PAGE_SIZE];
-            Elf64_Addr first_page = (ph.p_vaddr - (unsigned long) USER_START) / PAGE_SIZE;
-            Elf64_Xword page_cnt = ph.p_filesz / PAGE_SIZE;
+        for (unsigned int j = old_brk; j < current->vm.brk; j++)
+            prots[j] = ((ph.p_flags & PF_R) ? PROT_READ : 0) |
+                       ((ph.p_flags & PF_W) ? PROT_WRITE : 0) |
+                       ((ph.p_flags & PF_X) ? PROT_EXEC : 0);
+        lseek(fd, ph.p_offset, SEEK_SET);
 
-            lseek(fd, ph.p_offset, SEEK_SET);
+        Elf64_Addr first_page = (ph.p_vaddr - (unsigned long) USER_START) / PAGE_SIZE;
+        Elf64_Xword page_cnt = ph.p_filesz / PAGE_SIZE;
+        char page[PAGE_SIZE];
 
-            for (Elf64_Xword j = 0; j < page_cnt; j++) {
-                read(fd, page, PAGE_SIZE);
-                lseek(memfd, PAGE_SIZE * current->vm.map[first_page + j], SEEK_SET);
-                write(memfd, page, PAGE_SIZE);
-            }
+        for (Elf64_Xword j = 0; j < page_cnt; j++) {
+            read(fd, page, PAGE_SIZE);
+            lseek(memfd, PAGE_SIZE * current->vm.map[first_page + j], SEEK_SET);
+            write(memfd, page, PAGE_SIZE);
+        }
 
+        if (ph.p_filesz % PAGE_SIZE != 0) {
             read(fd, page, ph.p_filesz % PAGE_SIZE);
-            lseek(memfd, PAGE_SIZE * current->vm.map[first_page + page_cnt], SEEK_SET);
+            lseek(memfd, PAGE_SIZE * current->vm.map[first_page + page_count], SEEK_SET);
             write(memfd, page, ph.p_filesz % PAGE_SIZE);
         }
     }
     lseek(memfd, 0, SEEK_SET);
     struct ctx old, new;
     vmctx_apply(&current->vm);
-
-    for (unsigned int i = 0; i < current->vm.brk; i++) vmprotect(USER_START, PAGE_SIZE, prots[i]);
-
+    for (unsigned int i = 0; i < current->vm.brk; i++)
+        vmprotect(USER_START, PAGE_SIZE, prots[i]);
     current->main = (int (*)(int, char **)) eh.e_entry;
     ctx_make(&new, exectramp, USER_START + USER_PAGES * PAGE_SIZE);
     ctx_switch(&old, &new);
-
     return 0;
 }
 
