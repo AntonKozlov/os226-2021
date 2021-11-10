@@ -400,13 +400,13 @@ static int do_exec(const char *path, char *argv[]) {
 
     const Elf64_Ehdr *ehdr = (const Elf64_Ehdr *) rawelf;
 
-    if (ehdr->e_type == ET_EXEC || !ehdr->e_phoff || !ehdr->e_phnum || !ehdr->e_entry ||
+    if (ehdr->e_type != ET_EXEC || !ehdr->e_phoff || !ehdr->e_phnum || !ehdr->e_entry ||
         ehdr->e_phentsize != sizeof(Elf64_Phdr)) {
         fprintf(stderr, "Corrupted elf file\n");
         return 1;
     }
 
-    const Elf64_Phdr *phdrs = (const Elf64_Phdr *) rawelf + ehdr->e_phoff;
+    const Elf64_Phdr *phdrs = (const Elf64_Phdr *) (rawelf + ehdr->e_phoff);
 
     void *max_brk = current->vm.brk * PAGE_SIZE + USER_START - PAGE_SIZE + 1;
     for (int i = 0; i < ehdr->e_phnum; i++) {
