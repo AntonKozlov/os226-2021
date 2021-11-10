@@ -11,7 +11,7 @@ struct ctx {
 	unsigned long rip;
 };
 
-extern void ctx_make(struct ctx *ctx, void *entry, void *stack, int stacksz);
+extern void ctx_make(struct ctx *ctx, void *entry, void *stack);
 
 extern void ctx_switch(struct ctx *old, struct ctx *new);
 

@@ -7,7 +7,9 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
+#include <elf.h>
 #include <sys/mman.h>
+#include <sys/fcntl.h>
 
 #include "sched.h"
 #include "timer.h"
@@ -26,7 +28,7 @@
 #define PAGE_SIZE 4096
 
 #define USER_PAGES 1024
-#define USER_START ((void*)0x400000)
+#define USER_START ((void*)IUSERSPACE_START)
 #define USER_STACK_PAGES 2
 
 extern int shell(int argc, char *argv[]);
@@ -35,12 +37,21 @@ extern void tramptramp(void);
 
 struct vmctx {
 	unsigned map[USER_PAGES];
+	unsigned brk;
 };
 
 struct task {
 	char stack[8192];
-	struct ctx ctx;
 	struct vmctx vm;
+
+	union {
+		struct ctx ctx;
+		struct {
+			int(*main)(int, char**);
+			int argc;
+			char **argv;
+		};
+	};
 
 	void (*entry)(void *as);
 	void *as;
@@ -72,7 +83,8 @@ static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
 static sigset_t irqs;
 
 static int memfd = -1;
-static unsigned long bitmap_pages[MEM_PAGES / sizeof(unsigned long) * CHAR_BIT];
+#define LONG_BITS (sizeof(unsigned long) * CHAR_BIT)
+static unsigned long bitmap_pages[MEM_PAGES / LONG_BITS];
 
 void irq_disable(void) {
 	sigprocmask(SIG_BLOCK, &irqs, NULL);
@@ -83,18 +95,26 @@ void irq_enable(void) {
 }
 
 static int bitmap_alloc(unsigned long *bitmap, size_t size) {
-    int size_of = (sizeof(unsigned long) * CHAR_BIT);
-    unsigned long bit = 1 << (size_of - 1);
-    for (int i = 0; i < size; i++) {
-        for (int offset = 0; offset < size_of - 1; offset++) {
-            if ((bit & bitmap[i]) == 0) {
-                bitmap[i] |= bit;
-                return i * size_of + offset;
-            }
-            bit >>= 1;
-        }
-    }
-	return -1;
+	unsigned n = size / sizeof(*bitmap);
+	unsigned long *w = NULL;
+	for (int i = 0; i < n; ++i) {
+		if (bitmap[i] != -1) {
+			w = &bitmap[i];
+			break;
+		}
+	}
+	if (!w) {
+		fprintf(stderr, "cannot find free page\n");
+		abort();
+		return -1;
+	}
+	int v = ffsl(*w + 1) - 1;
+	*w |= 1 << v;
+	return v + (w - bitmap) * LONG_BITS;
+}
+
+static void bitmap_free(unsigned long *bitmap, size_t size, unsigned v) {
+	bitmap[v / LONG_BITS] &= ~(1 << (v % LONG_BITS));
 }
 
 static void policy_run(struct task *t) {
@@ -119,13 +139,25 @@ static void vmctx_make(struct vmctx *vm, size_t stack_size) {
 }
 
 static void vmctx_apply(struct vmctx *vm) {
-    for (int i = 0; i < USER_PAGES; i++) {
-        if (vm->map[i] != -1) {
-            munmap(USER_START + i * PAGE_SIZE, PAGE_SIZE);
-            mmap(USER_START + i * PAGE_SIZE, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, memfd,
-                 vm->map[i] * PAGE_SIZE);
-        }
-    }
+	munmap(USER_START, USER_STACK_PAGES * PAGE_SIZE);
+	for (int i = 0; i < USER_PAGES; ++i) {
+		if (vm->map[i] == -1) {
+			continue;
+		}
+		void *addr = mmap(USER_START + i * PAGE_SIZE,
+				PAGE_SIZE,
+				PROT_READ | PROT_WRITE | PROT_EXEC,
+				MAP_SHARED | MAP_FIXED,
+				memfd, vm->map[i] * PAGE_SIZE);
+		if (addr == MAP_FAILED) {
+			perror("mmap");
+			abort();
+		}
+
+		if (addr != USER_START + i * PAGE_SIZE) {
+			abort();
+		}
+	}
 }
 
 static void doswitch(void) {
@@ -148,8 +180,7 @@ static void tasktramp(void) {
 static void tasktramp0(void) {
 	struct ctx dummy, new;
 	vmctx_apply(&current->vm);
-	ctx_make(&new, tasktramp, USER_START + (USER_PAGES - USER_STACK_PAGES) * PAGE_SIZE,
-			USER_STACK_PAGES * PAGE_SIZE);
+	ctx_make(&new, tasktramp, USER_START + USER_PAGES * PAGE_SIZE);
 	ctx_switch(&dummy, &new);
 }
 
@@ -163,8 +194,8 @@ void sched_new(void (*entrypoint)(void *aspace),
 	t->priority = priority;
 	t->next = NULL;
 
-	vmctx_make(&t->vm, 8192);
-	ctx_make(&t->ctx, tasktramp0, t->stack, sizeof(t->stack));
+	vmctx_make(&t->vm, 4 * PAGE_SIZE);
+	ctx_make(&t->ctx, tasktramp0, t->stack + sizeof(t->stack));
 
 	if (!lastpending) {
 		lastpending = t;
@@ -311,7 +342,107 @@ static void sighnd(int sig, siginfo_t *info, void *ctx) {
 	regs[REG_RIP] += 2;
 }
 
+static int vmctx_brk(struct vmctx *vm, void *addr) {
+	int newbrk = (addr - USER_START + PAGE_SIZE - 1) / PAGE_SIZE;
+	if ((newbrk < 0) || (USER_PAGES <= newbrk)) {
+		fprintf(stderr, "Out-of-mem\n");
+		abort();
+	}
+
+	for (unsigned i = vm->brk; i < newbrk; ++i) {
+		vm->map[i] = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
+	}
+	for (unsigned i = newbrk; i < vm->brk; ++i) {
+		bitmap_free(bitmap_pages, sizeof(bitmap_pages), vm->map[i]);
+	}
+	vm->brk = newbrk;
+
+	return 0;
+}
+
+int vmprotect(void *start, unsigned len, int prot) {
+#if 0
+	if (mprotect(start, len, prot)) {
+		perror("mprotect");
+		return -1;
+	}
+#endif
+	return 0;
+}
+
+static void exectramp(void) {
+	irq_enable();
+	current->main(current->argc, current->argv);
+	irq_disable();
+	doswitch();
+}
+
+static int do_exec(const char *path, char *argv[]) {
+	int fd = open(path, O_RDONLY);
+	if (fd < 0) {
+		perror("open");
+		return 1;
+	}
+
+	void *rawelf = mmap(NULL, 128 * 1024, PROT_READ, MAP_PRIVATE, fd, 0);
+
+	if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5)) {
+		printf("ELF header mismatch\n");
+		return 1;
+	}
+
+    Elf64_Ehdr eh;
+    read(fd, &eh, sizeof(Elf64_Ehdr));
+    int prots[USER_PAGES];
+
+    for (Elf64_Half i = 0; i < eh.e_phnum; i++) {
+        lseek(fd, eh.e_phoff + i * sizeof(Elf64_Phdr), SEEK_SET);
+        Elf64_Phdr ph;
+        read(fd, &ph, sizeof(Elf64_Phdr));
+        if (ph.p_type != PT_LOAD) continue;
+
+        unsigned int old_brk = current->vm.brk;
+        vmctx_brk(&current->vm, (void *) (ph.p_vaddr + ph.p_memsz));
+
+        for (unsigned int j = old_brk; j < current->vm.brk; j++)
+            prots[j] = ((ph.p_flags & PF_R) ? PROT_READ : 0) |
+                       ((ph.p_flags & PF_W) ? PROT_WRITE : 0) |
+                       ((ph.p_flags & PF_X) ? PROT_EXEC : 0);
+        lseek(fd, ph.p_offset, SEEK_SET);
+
+        Elf64_Addr first_page = (ph.p_vaddr - (unsigned long) USER_START) / PAGE_SIZE;
+        Elf64_Xword page_cnt = ph.p_filesz / PAGE_SIZE;
+        char page[PAGE_SIZE];
+
+        for (Elf64_Xword j = 0; j < page_cnt; j++) {
+            read(fd, page, PAGE_SIZE);
+            lseek(memfd, PAGE_SIZE * current->vm.map[first_page + j], SEEK_SET);
+            write(memfd, page, PAGE_SIZE);
+        }
+
+        read(fd, page, ph.p_filesz % PAGE_SIZE);
+        lseek(memfd, PAGE_SIZE * current->vm.map[first_page + page_cnt], SEEK_SET);
+        write(memfd, page, ph.p_filesz % PAGE_SIZE);
+    }
+    lseek(memfd, 0, SEEK_SET);
+    struct ctx old, new;
+    vmctx_apply(&current->vm);
+    for (unsigned int i = 0; i < current->vm.brk; i++)
+        vmprotect(USER_START, PAGE_SIZE, prots[i]);
+    current->main = (int (*)(int, char **)) eh.e_entry;
+    ctx_make(&new, exectramp, USER_START + USER_PAGES * PAGE_SIZE);
+    ctx_switch(&old, &new);
+    return 0;
+}
+
+static void inittramp(void* arg) {
+	char *args = { NULL };
+	do_exec(arg, &args);
+}
+
 int main(int argc, char *argv[]) {
+	char *initpath = argv[1];
+
 	struct sigaction act = {
 		.sa_sigaction = sighnd,
 		.sa_flags = SA_RESTART,
@@ -334,5 +465,6 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	shell(0, NULL);
+	sched_new(inittramp, initpath, 0);
+	sched_run(0);
 }

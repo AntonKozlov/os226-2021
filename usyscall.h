@@ -1,7 +1,7 @@
 #pragma once
 
 #define SYSCALL_X(x) \
-	x(print, int, 2, char*, argv, int, len) \
+	x(print, int, 2, char*, str, int, len) \
 
 #define SC_NR(name, ...) os_syscall_nr_ ## name,
 enum syscalls_num {
