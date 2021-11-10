@@ -420,10 +420,10 @@ static int do_exec(const char *path, char *argv[]) {
         lseek(fd, ph.p_offset, SEEK_SET);
 
         Elf64_Addr first_page = (ph.p_vaddr - (unsigned long) USER_START) / PAGE_SIZE;
-        Elf64_Xword page_cnt = ph.p_filesz / PAGE_SIZE;
+        Elf64_Xword page_count = ph.p_filesz / PAGE_SIZE;
         char page[PAGE_SIZE];
 
-        for (Elf64_Xword j = 0; j < page_cnt; j++) {
+        for (Elf64_Xword j = 0; j < page_count; j++) {
             read(fd, page, PAGE_SIZE);
             lseek(memfd, PAGE_SIZE * current->vm.map[first_page + j], SEEK_SET);
             write(memfd, page, PAGE_SIZE);
