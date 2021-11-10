@@ -364,10 +364,12 @@ static int vmctx_brk(struct vmctx *vm, void *addr) {
 }
 
 int vmprotect(void *start, unsigned len, int prot) {
+#if 0
     if (mprotect(start, len, prot)) {
         perror("mprotect");
         return -1;
     }
+#endif
     return 0;
 }
 
@@ -391,6 +393,12 @@ static int do_exec(const char *path, char *argv[]) {
         printf("ELF header mismatch\n");
         return 1;
     }
+
+    // https://linux.die.net/man/5/elf
+    //
+    // Find Elf64_Ehdr -- at the very start
+    //   Elf64_Phdr -- find one with PT_LOAD, load it for execution
+    //   Find entry point (e_entry)
 
     Elf64_Ehdr eh;
     int prots[USER_PAGES];
