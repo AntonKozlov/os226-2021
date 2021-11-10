@@ -4,6 +4,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
+
+#include <time.h>
+#include <sys/time.h>
 
 #include "sched.h"
 #include "usyscall.h"
@@ -16,8 +20,8 @@ static int g_retcode;
         X(retcode) \
         X(pooltest) \
         X(syscalltest) \
-        X(coapp) \
-        X(cosched) \
+        X(app) \
+        X(sched) \
 
 #define DECLARE(X) static int X(int, char *[]);
 APPS_X(DECLARE)
@@ -31,6 +35,12 @@ static const struct app {
         APPS_X(ELEM)
 #undef ELEM
 };
+
+static long reftime(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 
 static int os_printf(const char *fmt, ...) {
 	char buf[128];
@@ -55,48 +65,51 @@ static int retcode(int argc, char *argv[]) {
 	return 0;
 }
 
-struct coapp_ctx {
+struct app_ctx {
         int cnt;
 } ctxarray[16];
 struct pool ctxpool = POOL_INITIALIZER_ARRAY(ctxarray);
 
-static void coapp_task(void *_ctx) {
-        struct coapp_ctx *ctx = _ctx;
-
-        printf("%16s id %d cnt %d\n", __func__, 1 + ctx - ctxarray, ctx->cnt);
-
-        if (0 < ctx->cnt) {
-                sched_cont(coapp_task, ctx, 2);
+static void print(struct app_ctx *ctx, const char *msg) {
+        static long refstart;
+        if (!refstart) {
+                refstart = reftime();
         }
 
-        --ctx->cnt;
+	printf("%16s id %d cnt %d time %ld reftime %ld ctx %p\n",
+			msg, 1 + ctx - ctxarray, ctx->cnt, sched_gettime(), reftime() - refstart, &ctx);
+	fflush(stdout);
 }
 
-static void coapp_rt(void *_ctx) {
-        struct coapp_ctx *ctx = _ctx;
-
-        printf("%16s id %d cnt %d\n", __func__, 1 + ctx - ctxarray, ctx->cnt);
-
-        sched_time_elapsed(1);
-
-        if (0 < ctx->cnt) {
-                sched_cont(coapp_rt, ctx, 0);
-        }
-
-        --ctx->cnt;
+static void app_burn(void *_ctx) {
+	struct app_ctx *ctx = _ctx;
+	while (1)  {
+		print(ctx, "burn");
+		for (volatile int i = 100000 * ctx->cnt; 0 < i; --i) {
+		}
+	}
 }
 
-static int coapp(int argc, char* argv[]) {
+static void app_preempt_sleep(void *_ctx) {
+	struct app_ctx *ctx = _ctx;
+	int cnt = ctx->cnt % 1000;
+	for (int i = 0; i < cnt; ++i) {
+		print(ctx, "sleep");
+		sched_sleep(ctx->cnt - cnt);
+	}
+}
+
+static int app(int argc, char* argv[]) {
         int entry_id = atoi(argv[1]) - 1;
 
-        struct coapp_ctx *ctx = pool_alloc(&ctxpool);
+        struct app_ctx *ctx = pool_alloc(&ctxpool);
         ctx->cnt = atoi(argv[2]);
 
-        void (*entries[])(void*) = { coapp_task, coapp_rt };
-        sched_new(entries[entry_id], ctx, atoi(argv[3]), atoi(argv[4]));
+        void (*entries[])(void*) = { app_burn, app_preempt_sleep };
+        sched_new(entries[entry_id], ctx, atoi(argv[3]));
 }
 
-static int cosched(int argc, char* argv[]) {
+static int sched(int argc, char* argv[]) {
         sched_run(atoi(argv[1]));
 }
 
