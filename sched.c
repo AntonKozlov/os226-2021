@@ -36,16 +36,26 @@ extern int shell(int argc, char *argv[]);
 extern void tramptramp(void);
 
 struct vmctx {
-    unsigned map[USER_PAGES];
-    unsigned brk;
+	unsigned map[USER_PAGES];
+	unsigned brk;
 };
 
 struct task {
-    char stack[8192];
-    struct vmctx vm;
+	char stack[8192];
+	struct vmctx vm;
 
-    union {
-        struct ctx ctx;
+	union {
+		struct ctx ctx;
+		struct {
+			int(*main)(int, char**);
+			int argc;
+			char **argv;
+		};
+	};
+
+	void (*entry)(void *as);
+	void *as;
+	int priority;
 
         struct {
             int (*main)(int, char **);
@@ -98,26 +108,26 @@ void irq_enable(void) {
 }
 
 static int bitmap_alloc(unsigned long *bitmap, size_t size) {
-    unsigned n = size / sizeof(*bitmap);
-    unsigned long *w = NULL;
-    for (int i = 0; i < n; ++i) {
-        if (bitmap[i] != -1) {
-            w = &bitmap[i];
-            break;
-        }
-    }
-    if (!w) {
-        fprintf(stderr, "cannot find free page\n");
-        abort();
-        return -1;
-    }
-    int v = ffsl(*w + 1) - 1;
-    *w |= 1 << v;
-    return v + (w - bitmap) * LONG_BITS;
+	unsigned n = size / sizeof(*bitmap);
+	unsigned long *w = NULL;
+	for (int i = 0; i < n; ++i) {
+		if (bitmap[i] != -1) {
+			w = &bitmap[i];
+			break;
+		}
+	}
+	if (!w) {
+		fprintf(stderr, "cannot find free page\n");
+		abort();
+		return -1;
+	}
+	int v = ffsl(*w + 1) - 1;
+	*w |= 1 << v;
+	return v + (w - bitmap) * LONG_BITS;
 }
 
 static void bitmap_free(unsigned long *bitmap, size_t size, unsigned v) {
-    bitmap[v / LONG_BITS] &= ~(1 << (v % LONG_BITS));
+	bitmap[v / LONG_BITS] &= ~(1 << (v % LONG_BITS));
 }
 
 static void policy_run(struct task *t) {
@@ -142,25 +152,25 @@ static void vmctx_make(struct vmctx *vm, size_t stack_size) {
 }
 
 static void vmctx_apply(struct vmctx *vm) {
-    munmap(USER_START, USER_STACK_PAGES * PAGE_SIZE);
-    for (int i = 0; i < USER_PAGES; ++i) {
-        if (vm->map[i] == -1) {
-            continue;
-        }
-        void *addr = mmap(USER_START + i * PAGE_SIZE,
-                          PAGE_SIZE,
-                          PROT_READ | PROT_WRITE | PROT_EXEC,
-                          MAP_SHARED | MAP_FIXED,
-                          memfd, vm->map[i] * PAGE_SIZE);
-        if (addr == MAP_FAILED) {
-            perror("mmap");
-            abort();
-        }
+	munmap(USER_START, USER_STACK_PAGES * PAGE_SIZE);
+	for (int i = 0; i < USER_PAGES; ++i) {
+		if (vm->map[i] == -1) {
+			continue;
+		}
+		void *addr = mmap(USER_START + i * PAGE_SIZE,
+				PAGE_SIZE,
+				PROT_READ | PROT_WRITE | PROT_EXEC,
+				MAP_SHARED | MAP_FIXED,
+				memfd, vm->map[i] * PAGE_SIZE);
+		if (addr == MAP_FAILED) {
+			perror("mmap");
+			abort();
+		}
 
-        if (addr != USER_START + i * PAGE_SIZE) {
-            abort();
-        }
-    }
+		if (addr != USER_START + i * PAGE_SIZE) {
+			abort();
+		}
+	}
 }
 
 static void doswitch(void) {
@@ -181,32 +191,32 @@ static void tasktramp(void) {
 }
 
 static void tasktramp0(void) {
-    struct ctx dummy, new;
-    vmctx_apply(&current->vm);
-    ctx_make(&new, tasktramp, USER_START + USER_PAGES * PAGE_SIZE);
-    ctx_switch(&dummy, &new);
+	struct ctx dummy, new;
+	vmctx_apply(&current->vm);
+	ctx_make(&new, tasktramp, USER_START + USER_PAGES * PAGE_SIZE);
+	ctx_switch(&dummy, &new);
 }
 
 void sched_new(void (*entrypoint)(void *aspace),
-               void *aspace,
-               int priority) {
+		void *aspace,
+		int priority) {
 
-    struct task *t = pool_alloc(&taskpool);
-    t->entry = entrypoint;
-    t->as = aspace;
-    t->priority = priority;
-    t->next = NULL;
+	struct task *t = pool_alloc(&taskpool);
+	t->entry = entrypoint;
+	t->as = aspace;
+	t->priority = priority;
+	t->next = NULL;
 
-    vmctx_make(&t->vm, 4 * PAGE_SIZE);
-    ctx_make(&t->ctx, tasktramp0, t->stack + sizeof(t->stack));
+	vmctx_make(&t->vm, 4 * PAGE_SIZE);
+	ctx_make(&t->ctx, tasktramp0, t->stack + sizeof(t->stack));
 
-    if (!lastpending) {
-        lastpending = t;
-        pendingq = t;
-    } else {
-        lastpending->next = t;
-        lastpending = t;
-    }
+	if (!lastpending) {
+		lastpending = t;
+		pendingq = t;
+	} else {
+		lastpending->next = t;
+		lastpending = t;
+	}
 }
 
 void sched_sleep(unsigned ms) {
@@ -451,31 +461,92 @@ static void inittramp(void *arg) {
     do_exec(arg, &args);
 }
 
+static int vmctx_brk(struct vmctx *vm, void *addr) {
+	int newbrk = (addr - USER_START + PAGE_SIZE - 1) / PAGE_SIZE;
+	if ((newbrk < 0) || (USER_PAGES <= newbrk)) {
+		fprintf(stderr, "Out-of-mem\n");
+		abort();
+	}
+
+	for (unsigned i = vm->brk; i < newbrk; ++i) {
+		vm->map[i] = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
+	}
+	for (unsigned i = newbrk; i < vm->brk; ++i) {
+		bitmap_free(bitmap_pages, sizeof(bitmap_pages), vm->map[i]);
+	}
+	vm->brk = newbrk;
+
+	return 0;
+}
+
+int vmprotect(void *start, unsigned len, int prot) {
+#if 0
+	if (mprotect(start, len, prot)) {
+		perror("mprotect");
+		return -1;
+	}
+#endif
+	return 0;
+}
+
+static void exectramp(void) {
+	irq_enable();
+	current->main(current->argc, current->argv);
+	irq_disable();
+	doswitch();
+}
+
+static int do_exec(const char *path, char *argv[]) {
+	int fd = open(path, O_RDONLY);
+	if (fd < 0) {
+		perror("open");
+		return 1;
+	}
+
+	void *rawelf = mmap(NULL, 128 * 1024, PROT_READ, MAP_PRIVATE, fd, 0);
+
+	if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5)) {
+		printf("ELF header mismatch\n");
+		return 1;
+	}
+
+	// https://linux.die.net/man/5/elf
+	//
+	// Find Elf64_Ehdr -- at the very start
+	//   Elf64_Phdr -- find one with PT_LOAD, load it for execution
+	//   Find entry point (e_entry)
+}
+
+static void inittramp(void* arg) {
+	char *args = { NULL };
+	do_exec(arg, &args);
+}
+
 int main(int argc, char *argv[]) {
-    char *initpath = argv[1];
+	char *initpath = argv[1];
 
-    struct sigaction act = {
-            .sa_sigaction = sighnd,
-            .sa_flags = SA_RESTART,
-    };
-    sigemptyset(&act.sa_mask);
+	struct sigaction act = {
+		.sa_sigaction = sighnd,
+		.sa_flags = SA_RESTART,
+	};
+	sigemptyset(&act.sa_mask);
 
-    if (-1 == sigaction(SIGSEGV, &act, NULL)) {
-        perror("signal set failed");
-        return 1;
-    }
+	if (-1 == sigaction(SIGSEGV, &act, NULL)) {
+		perror("signal set failed");
+		return 1;
+	}
 
-    memfd = memfd_create("mem", 0);
-    if (memfd < 0) {
-        perror("memfd_create");
-        return 1;
-    }
+	memfd = memfd_create("mem", 0);
+	if (memfd < 0) {
+		perror("memfd_create");
+		return 1;
+	}
 
-    if (ftruncate(memfd, PAGE_SIZE * MEM_PAGES) < 0) {
-        perror("ftrucate");
-        return 1;
-    }
+	if (ftruncate(memfd, PAGE_SIZE * MEM_PAGES) < 0) {
+		perror("ftrucate");
+		return 1;
+	}
 
-    sched_new(inittramp, initpath, 0);
-    sched_run(0);
+	sched_new(inittramp, initpath, 0);
+	sched_run(0);
 }
