@@ -7,7 +7,11 @@ enum policy {
     // highest priority task (highest priority value) should be executed
     // first. Use round-robin for processes with same priority
     // (task from 1st process, from 2nd, ... Nth, 1st, 2nd, ...)
-    POLICY_PRIO
+    POLICY_PRIO,
+
+    // consider deadline, execute process with Earliest Deadline First.
+    // Fallback to priority policy if deadlines are equal
+    POLICY_DEADLINE,
 };
 
 // Add new task

@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <signal.h>
 #include <sys/time.h>
 
@@ -10,13 +11,10 @@
 static struct timeval initv;
 
 int timer_cnt(void) {
-    struct itimerval timer;
-    if (getitimer(ITIMER_REAL, &timer)) {
-        fprintf(stderr, "Get timer error");
-        return -1;
-    }
-    return 1000000 * (initv.tv_sec - timer.it_value.tv_sec)
-           + (initv.tv_usec - timer.it_value.tv_usec);
+    struct itimerval it;
+    getitimer(ITIMER_REAL, &it);
+    return 1000000 * (initv.tv_sec - it.it_value.tv_sec)
+           + (initv.tv_usec - it.it_value.tv_usec);
 }
 
 void timer_init(int ms, void (*hnd)(int sig, siginfo_t *info, void *ctx)) {

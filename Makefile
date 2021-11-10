@@ -17,7 +17,7 @@ try : main
 	$ ./main
 
 clean :
-	$(RM) *.o *.d main
+	$(RM) *.o *.app *.d main
 
 APPS = $(patsubst %.app.c,%.app,$(wildcard *.app.c))
 
