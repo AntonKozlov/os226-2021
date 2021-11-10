@@ -36,8 +36,8 @@ extern int shell(int argc, char* argv[]);
 extern void tramptramp(void);
 
 struct vmctx {
-    unsigned map[USER_PAGES];
-    unsigned brk;
+    unsigned int map[USER_PAGES];
+    unsigned int brk;
 };
 
 struct task {
@@ -346,13 +346,11 @@ static int vmctx_brk(struct vmctx* vm, void* addr) {
     return 0;
 }
 
-int vmprotect(void* start, unsigned len, int prot) {
-#if 0
+static int vmprotect(void* start, unsigned len, int prot) {
     if (mprotect(start, len, prot) == -1) {
         perror("mprotect");
         return -1;
     }
-#endif
     return 0;
 }
 
@@ -371,17 +369,60 @@ static int do_exec(const char* path, char* argv[]) {
     }
 
     void* rawelf = mmap(NULL, 128 * 1024, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (rawelf == MAP_FAILED) {
+        perror("mmap");
+        abort();
+    }
 
     if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5) != 0) {
         printf("ELF header mismatch\n");
         return 1;
     }
 
-    // https://linux.die.net/man/5/elf
-    //
-    // Find Elf64_Ehdr -- at the very start
-    //   Elf64_Phdr -- find one with PT_LOAD, load it for execution
-    //   Find entry point (e_entry)
+    const Elf64_Ehdr* ehdr = (Elf64_Ehdr*) rawelf;
+
+    if (ehdr->e_type != ET_EXEC || ehdr->e_phoff == 0 || ehdr->e_phnum == 0 || ehdr->e_phentsize == 0 ||
+        ehdr->e_entry == 0) {
+        fprintf(stderr, "invalid ELF header");
+        return 1;
+    }
+
+    const Elf64_Phdr* phdrs_start = (Elf64_Phdr*) (rawelf + ehdr->e_phoff);
+
+    void* max_brk_addr = USER_START + current->vm.brk * PAGE_SIZE - PAGE_SIZE + 1;
+    for (unsigned int i = 0; i < ehdr->e_phnum; i++) {
+        Elf64_Phdr* phdr = (Elf64_Phdr*) phdrs_start + i;
+        if (phdr->p_type != PT_LOAD) continue;
+        if ((void*) phdr->p_vaddr + phdr->p_memsz > max_brk_addr) max_brk_addr = (void*) phdr->p_vaddr + phdr->p_memsz;
+    }
+
+    vmctx_brk(&current->vm, max_brk_addr);
+    vmctx_apply(&current->vm);
+
+    for (unsigned int i = 0; i < ehdr->e_phnum; i++) {
+        Elf64_Phdr* phdr = (Elf64_Phdr*) phdrs_start + i;
+        if (phdr->p_type != PT_LOAD) continue;
+
+        memcpy((void*) phdr->p_vaddr, rawelf + phdr->p_offset, phdr->p_filesz);
+
+        int prot = ((phdr->p_flags & PF_X) ? PROT_EXEC : 0) |
+                   ((phdr->p_flags & PF_R) ? PROT_READ : 0) |
+                   ((phdr->p_flags & PF_W) ? PROT_WRITE : 0);
+        if (vmprotect((void*) phdr->p_vaddr, phdr->p_memsz, prot) != 0) {
+            printf("vmprotect failed");
+            abort();
+        }
+    }
+
+    struct ctx dummy, new;
+    ctx_make(&new, exectramp, USER_START + USER_PAGES * PAGE_SIZE);
+    current->main = (int (*)(int, char**)) ehdr->e_entry;
+    ctx_switch(&dummy, &new);
+
+    if (munmap(rawelf, 128 * 1024) == -1) {
+        perror("munmap");
+        abort();
+    }
 
     return 0;
 }
