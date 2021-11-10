@@ -361,12 +361,10 @@ static int vmctx_brk(struct vmctx *vm, void *addr) {
 }
 
 int vmprotect(void *start, unsigned len, int prot) {
-#if 0
 	if (mprotect(start, len, prot)) {
 		perror("mprotect");
 		return -1;
 	}
-#endif
 	return 0;
 }
 
