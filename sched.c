@@ -371,7 +371,7 @@ static int do_exec(const char* path, char* argv[]) {
     void* rawelf = mmap(NULL, 128 * 1024, PROT_READ, MAP_PRIVATE, fd, 0);
     if (rawelf == MAP_FAILED) {
         perror("mmap");
-        abort();
+        return 1;
     }
 
     if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5) != 0) {
@@ -381,23 +381,41 @@ static int do_exec(const char* path, char* argv[]) {
 
     const Elf64_Ehdr* ehdr = (Elf64_Ehdr*) rawelf;
 
-    if (ehdr->e_type != ET_EXEC || ehdr->e_phoff == 0 || ehdr->e_phnum == 0 || ehdr->e_phentsize == 0 ||
-        ehdr->e_entry == 0) {
-        fprintf(stderr, "invalid ELF header");
+    if (ehdr->e_type != ET_EXEC || ehdr->e_phoff == 0 || ehdr->e_phnum == 0 ||
+        ehdr->e_phentsize != sizeof(Elf64_Phdr) || ehdr->e_entry == 0) {
+        fprintf(stderr, "invalid ELF header\n");
         return 1;
     }
 
     const Elf64_Phdr* phdrs_start = (Elf64_Phdr*) (rawelf + ehdr->e_phoff);
 
-    void* max_brk_addr = USER_START + current->vm.brk * PAGE_SIZE - PAGE_SIZE + 1;
+    void* max_addr = USER_START;
     for (unsigned int i = 0; i < ehdr->e_phnum; i++) {
         Elf64_Phdr* phdr = (Elf64_Phdr*) phdrs_start + i;
         if (phdr->p_type != PT_LOAD) continue;
-        if ((void*) phdr->p_vaddr + phdr->p_memsz > max_brk_addr) max_brk_addr = (void*) phdr->p_vaddr + phdr->p_memsz;
+        if (phdr->p_vaddr < IUSERSPACE_START) fprintf(stderr, "bad section\n");
+        if ((void*) (phdr->p_vaddr + phdr->p_memsz) > max_addr) max_addr = (void*) (phdr->p_vaddr + phdr->p_memsz);
     }
 
-    vmctx_brk(&current->vm, max_brk_addr);
+    char** copyargv = USER_START + (USER_PAGES - 1) * PAGE_SIZE;
+    char* copybuf = (char*) (copyargv + 32);
+    char* const* arg = argv;
+    char** copyarg = copyargv;
+    while (*arg != NULL) {
+        *copyarg++ = strcpy(copybuf, *arg++);
+        copybuf += strlen(copybuf) + 1;
+    }
+    *copyarg = NULL;
+
+    if (vmctx_brk(&current->vm, max_addr) != 0) {
+        fprintf(stderr, "vmctx_brk failed\n");
+        return 1;
+    }
     vmctx_apply(&current->vm);
+    if (vmprotect(USER_START, max_addr - USER_START, PROT_READ | PROT_WRITE) != 0) {
+        fprintf(stderr, "vmprotect read-write failed\n");
+        return 1;
+    }
 
     for (unsigned int i = 0; i < ehdr->e_phnum; i++) {
         Elf64_Phdr* phdr = (Elf64_Phdr*) phdrs_start + i;
@@ -409,14 +427,18 @@ static int do_exec(const char* path, char* argv[]) {
                    ((phdr->p_flags & PF_R) ? PROT_READ : 0) |
                    ((phdr->p_flags & PF_W) ? PROT_WRITE : 0);
         if (vmprotect((void*) phdr->p_vaddr, phdr->p_memsz, prot) != 0) {
-            printf("vmprotect failed");
-            abort();
+            fprintf(stderr, "vmprotect section failed\n");
+            return 1;
         }
     }
 
     struct ctx dummy, new;
-    ctx_make(&new, exectramp, USER_START + USER_PAGES * PAGE_SIZE);
+    ctx_make(&new, exectramp, (char*) copyargv);
+
     current->main = (int (*)(int, char**)) ehdr->e_entry;
+    current->argv = copyargv;
+    current->argc = (int) (copyarg - copyargv);
+
     ctx_switch(&dummy, &new);
 
     if (munmap(rawelf, 128 * 1024) == -1) {
