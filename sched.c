@@ -16,6 +16,7 @@
 #include "pool.h"
 #include "ctx.h"
 #include "syscall.h"
+#include "usyscall.h"
 
 /* AMD64 Sys V ABI, 3.2.2 The Stack Frame:
    The 128-byte area beyond the location pointed to by %rsp is considered to
@@ -35,9 +36,12 @@ extern int shell(int argc, char* argv[]);
 
 extern void tramptramp(void);
 
+extern void exittramp(void);
+
 struct vmctx {
     unsigned int map[USER_PAGES];
     unsigned int brk;
+    unsigned int stack;
 };
 
 struct task {
@@ -66,6 +70,34 @@ struct task {
     // policy support
     struct task* next;
 };
+
+struct savedctx {
+    unsigned long rbp;
+    unsigned long r15;
+    unsigned long r14;
+    unsigned long r13;
+    unsigned long r12;
+    unsigned long r11;
+    unsigned long r10;
+    unsigned long r9;
+    unsigned long r8;
+    unsigned long rdi;
+    unsigned long rsi;
+    unsigned long rdx;
+    unsigned long rcx;
+    unsigned long rbx;
+    unsigned long rax;
+    unsigned long rflags;
+    unsigned long bottom;
+    unsigned long stack;
+    unsigned long sig;
+    unsigned long oldsp;
+    unsigned long rip;
+};
+
+static void syscallbottom(unsigned long sp);
+
+static int do_fork(unsigned long sp);
 
 static int time = 0;
 
@@ -135,6 +167,7 @@ static void policy_run(struct task* t) {
 }
 
 static void vmctx_make(struct vmctx* vm, size_t stack_size) {
+    vm->stack = USER_PAGES - stack_size / PAGE_SIZE;
     memset(vm->map, -1, sizeof(vm->map));
     for (int i = 0; i < stack_size / PAGE_SIZE; i++) {
         int mempage = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
@@ -144,7 +177,7 @@ static void vmctx_make(struct vmctx* vm, size_t stack_size) {
 
 // Applies the virtual memory mapping (switches the context)
 static void vmctx_apply(struct vmctx* vm) {
-    if (munmap(USER_START, USER_STACK_PAGES * PAGE_SIZE) == -1) { // TODO: fix len, use MAP_FIXED_NOREPLACE in mmap
+    if (munmap(USER_START, USER_PAGES * PAGE_SIZE) == -1) {
         perror("munmap");
         abort();
     }
@@ -153,7 +186,7 @@ static void vmctx_apply(struct vmctx* vm) {
         if (vm->map[i] == -1) continue;
 
         if (mmap(USER_START + i * PAGE_SIZE, PAGE_SIZE, PROT_EXEC | PROT_READ | PROT_WRITE,
-                 MAP_SHARED | MAP_FIXED, memfd, vm->map[i] * PAGE_SIZE) == MAP_FAILED) {
+                 MAP_SHARED | MAP_FIXED_NOREPLACE, memfd, vm->map[i] * PAGE_SIZE) == MAP_FAILED) {
             perror("mmap");
             abort();
         }
@@ -178,28 +211,17 @@ static void tasktramp(void) {
     doswitch();
 }
 
-static void tasktramp0(void) {
-    struct ctx dummy, new;
-    vmctx_apply(&current->vm);
-    ctx_make(&new, tasktramp, USER_START + USER_PAGES * PAGE_SIZE);
-    ctx_switch(&dummy, &new);
-}
-
 // Creates context for the task and adds it to the pending queue
-void sched_new(void (* entrypoint)(void* aspace), void* aspace, int priority) {
+struct task* sched_new(void (* entrypoint)(void* aspace), void* aspace, int priority) {
     struct task* t = pool_alloc(&taskpool);
-    *t = (struct task) {.entry = entrypoint, .as = aspace, .priority = priority, .next = NULL};
+    t->entry = entrypoint;
+    t->as = aspace;
+    t->priority = priority;
+    t->next = NULL;
 
-    vmctx_make(&t->vm, 4 * PAGE_SIZE);
-    ctx_make(&t->ctx, tasktramp0, t->stack + sizeof(t->stack));
+    ctx_make(&t->ctx, tasktramp, t->stack + sizeof(t->stack));
 
-    if (lastpending == NULL) {
-        lastpending = t;
-        pendingq = t;
-    } else {
-        lastpending->next = t;
-        lastpending = t;
-    }
+    return t;
 }
 
 void sched_sleep(unsigned ms) {
@@ -239,7 +261,7 @@ static void hctx_push(greg_t* regs, unsigned long val) {
     *(unsigned long*) regs[REG_RSP] = val;
 }
 
-static void bottom(void) {
+static void timerbottom() {
     time += TICK_PERIOD;
 
     while (waitq != NULL && waitq->waketime <= sched_gettime()) {
@@ -258,6 +280,12 @@ static void bottom(void) {
     }
 }
 
+static unsigned long bottom(unsigned long sp, int sig) {
+    if (sig == SIGALRM) timerbottom();
+    else if (sig == SIGSEGV) syscallbottom(sp);
+    return sp;
+}
+
 static void top(int sig, siginfo_t* info, void* ctx) {
     ucontext_t* uc = (ucontext_t*) ctx;
     greg_t* regs = uc->uc_mcontext.gregs;
@@ -266,6 +294,7 @@ static void top(int sig, siginfo_t* info, void* ctx) {
     regs[REG_RSP] -= SYSV_REDST_SZ;
     hctx_push(regs, regs[REG_RIP]);
     hctx_push(regs, oldsp);
+    hctx_push(regs, sig);
     hctx_push(regs, (unsigned long) (current->stack + sizeof(current->stack) - 16));
     hctx_push(regs, (unsigned long) bottom);
     regs[REG_RIP] = (greg_t) tramptramp;
@@ -275,21 +304,11 @@ long sched_gettime(void) {
     return time + timer_cnt() / 1000;
 }
 
-void sched_run(enum policy policy) {
-    int (* policies[])(struct task* t1, struct task* t2) = {fifo_cmp, prio_cmp};
-    policy_cmp = policies[policy];
-
-    struct task* t = pendingq;
-    while (t != NULL) {
-        struct task* next = t->next;
-        policy_run(t);
-        t = next;
-    }
-
+void sched_run(void) {
     sigemptyset(&irqs);
     sigaddset(&irqs, SIGALRM);
 
-    timer_init(TICK_PERIOD, top);
+    /*timer_init(TICK_PERIOD, top);*/
 
     irq_disable();
 
@@ -311,21 +330,20 @@ void sched_run(enum policy policy) {
     irq_enable();
 }
 
-static void sighnd(int sig, siginfo_t* info, void* ctx) {
-    ucontext_t* uc = (ucontext_t*) ctx;
-    greg_t* regs = uc->uc_mcontext.gregs;
+static void syscallbottom(unsigned long sp) {
+    struct savedctx* sc = (struct savedctx*) sp;
 
-    uint16_t insn = *(uint16_t*) regs[REG_RIP];
-    if (insn != 0x81cd) {
-        fprintf(stderr, "sighnd: received %x\n", insn);
-        abort();
+    uint16_t insn = *(uint16_t*) sc->rip;
+    if (insn != 0x81cd) abort();
+
+    sc->rip += 2;
+
+    if (sc->rax == os_syscall_nr_fork) sc->rax = do_fork(sp);
+    else {
+        sc->rax = syscall_do((int) sc->rax, sc->rbx,
+                             sc->rcx, sc->rdx,
+                             sc->rsi, (void*) sc->rdi);
     }
-
-    regs[REG_RAX] = (greg_t) syscall_do((int) regs[REG_RAX], regs[REG_RBX],
-                                        regs[REG_RCX], regs[REG_RDX],
-                                        regs[REG_RSI], (void*) regs[REG_RDI]);
-
-    regs[REG_RIP] += 2;
 }
 
 static int vmctx_brk(struct vmctx* vm, void* addr) {
@@ -358,11 +376,13 @@ static void exectramp(void) {
     irq_enable();
     current->main(current->argc, current->argv);
     irq_disable();
-    doswitch();
+    abort();
 }
 
 static int do_exec(const char* path, char* argv[]) {
-    int fd = open(path, O_RDONLY);
+    char elfpath[32];
+    snprintf(elfpath, sizeof(elfpath), "%s.app", path);
+    int fd = open(elfpath, O_RDONLY);
     if (fd < 0) {
         perror("open");
         return 1;
@@ -451,14 +471,51 @@ static int do_exec(const char* path, char* argv[]) {
 
 static void inittramp(void* arg) {
     char* args = {NULL};
-    do_exec(arg, &args);
+    do_exec("init", &args);
+}
+
+static void forktramp(void* arg) {
+    vmctx_apply(&current->vm);
+
+    struct ctx dummy, new;
+    ctx_make(&new, exittramp, arg);
+    ctx_switch(&dummy, &new);
+}
+
+static void copyrange(struct vmctx* vm, unsigned from, unsigned to) {
+    for (unsigned i = from; i < to; ++i) {
+        vm->map[i] = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
+        if (vm->map[i] == -1) abort();
+        if (pwrite(memfd,
+                   USER_START + i * PAGE_SIZE,
+                   PAGE_SIZE,
+                   vm->map[i] * PAGE_SIZE) == -1) {
+            perror("pwrite");
+            abort();
+        }
+    }
+}
+
+static void vmctx_copy(struct vmctx* dst, struct vmctx* src) {
+    dst->brk = src->brk;
+    dst->stack = src->stack;
+    copyrange(dst, 0, src->brk);
+    copyrange(dst, src->stack, USER_PAGES - 1);
+}
+
+static int do_fork(unsigned long sp) {
+    struct task* t = sched_new(forktramp, (void*) sp, 0);
+    vmctx_copy(&t->vm, &current->vm);
+    policy_run(t);
+}
+
+int sys_exit(int code) {
+    doswitch();
 }
 
 int main(int argc, char* argv[]) {
-    char* initpath = argv[1];
-
     struct sigaction act = {
-            .sa_sigaction = sighnd,
+            .sa_sigaction = top,
             .sa_flags = SA_RESTART,
     };
     sigemptyset(&act.sa_mask);
@@ -479,6 +536,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    sched_new(inittramp, initpath, 0);
-    sched_run(0);
+    policy_cmp = prio_cmp;
+    struct task* t = sched_new(inittramp, NULL, 0);
+    vmctx_make(&t->vm, 4 * PAGE_SIZE);
+    policy_run(t);
+    sched_run();
 }
