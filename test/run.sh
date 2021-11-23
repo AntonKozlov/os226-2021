@@ -1,7 +1,11 @@
 #!/bin/bash
 
 B=$(readlink -f $(dirname $0))
-MAIN=$B/../main
+MAIN=runmain 
+
+runmain() {
+	( cd $B/.. ; ./main )
+}
 
 map() {
 	local c="$1" i r
@@ -40,6 +44,11 @@ checkfn() {
 
 checkdifftimeout() {
 	< $1.in timeout 10 $MAIN | diffout $1
+	checkpipe 124 0
+}
+
+checkfntimeout() {
+	< $1.in timeout 10 $MAIN | ./$1.fn
 	checkpipe 124 0
 }
 
