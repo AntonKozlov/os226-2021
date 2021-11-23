@@ -44,7 +44,7 @@ struct vmctx {
 };
 
 struct task {
-    char stack[8192];
+    char stack[8192 * 2];
     struct vmctx vm;
 
     union {
@@ -399,8 +399,8 @@ static void exectramp(void) {
 }
 
 static int do_exec(const char *path, char *argv[]) {
-    char elfpath[32];
-    snprintf(elfpath, sizeof(elfpath), "%s.app", path);
+    char elfpath[32] = "init.app";
+    // snprintf(elfpath, sizeof(elfpath), "%s.app", path);
     int fd = open(elfpath, O_RDONLY);
     if (fd < 0) {
         perror("open");
@@ -409,7 +409,7 @@ static int do_exec(const char *path, char *argv[]) {
 
     void *rawelf = mmap(NULL, 128 * 1024, PROT_READ, MAP_PRIVATE, fd, 0);
 
-    if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5)) {
+    if (strncmp(rawelf, "\x7f" "ELF" "\x02", 5)) {
         printf("ELF header mismatch\n");
         return 1;
     }

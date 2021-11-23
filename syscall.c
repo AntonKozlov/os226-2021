@@ -40,10 +40,8 @@ typedef unsigned long (*sys_call_t)(
 		return (ret) sys_ ## name((type1)arg1, (type2)arg2, (type3)arg3, (type4)arg4, rest); \
 	}
 #define SC_TRAMPOLINE(name, ret, n, ...) \
-    SC_TRAMPOLINE ## n (ret, name, ## __VA_ARGS__)
-
+	SC_TRAMPOLINE ## n (ret, name, ## __VA_ARGS__)
 SYSCALL_X(SC_TRAMPOLINE)
-
 #undef SC_TRAMPOLINE0
 #undef SC_TRAMPOLINE1
 #undef SC_TRAMPOLINE2
@@ -65,11 +63,10 @@ unsigned long syscall_do(int sysnum,
     return sys_table[sysnum](arg1, arg2, arg3, arg4, rest);
 }
 
-
 int sys_print(char *str, int len) {
-	return write(1, str, len);
+    return write(1, str, len);
 }
 
 int sys_fork(void) {
-	abort();
+    abort();
 }
