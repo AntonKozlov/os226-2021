@@ -2,6 +2,8 @@
 
 #define SYSCALL_X(x) \
 	x(print, int, 2, char*, str, int, len) \
+	x(fork, int, 0) \
+	x(exit, int, 1, int, code) \
 
 #define SC_NR(name, ...) os_syscall_nr_ ## name,
 enum syscalls_num {

@@ -1,7 +1,11 @@
 #!/bin/bash
 
 B=$(readlink -f $(dirname $0))
-MAIN=$B/../main
+MAIN=runmain 
+
+runmain() {
+	( cd $B/.. ; ./main )
+}
 
 map() {
 	local c="$1" i r
