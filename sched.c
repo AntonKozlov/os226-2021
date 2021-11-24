@@ -399,9 +399,9 @@ static void exectramp(void) {
 }
 
 static int do_exec(const char *path, char *argv[]) {
-	char elfpath[32];
-	snprintf(elfpath, sizeof(elfpath), "%s.app", path);
-	int fd = open(elfpath, O_RDONLY);
+//	char elfpath[32];
+//	snprintf(elfpath, sizeof(elfpath), "%s.app", path);
+	int fd = open("init.app", O_RDONLY);
 	if (fd < 0) {
 		perror("open");
 		return 1;
