@@ -17,13 +17,19 @@ tramptramp:
 	push %r13
 	push %r14
 	push %r15
-	/* FIXME vfp, xmm ...*/
+	push %rbp
 
 	mov %rsp, %rbx
-	mov 16*8(%rsp), %rsp
-	call *15*8(%rbx)
-	mov %rbx, %rsp
+	mov %rsp, %rdi
+    mov 18*8(%rbx), %rsi
+    mov 17*8(%rbx), %rsp
+    call *16*8(%rbx)
+    mov %rbx, %rsp
 
+    jmp exittramp
+
+.global exittramp
+exittramp:
 	pop %r15
 	pop %r14
 	pop %r13
@@ -40,5 +46,5 @@ tramptramp:
 	pop %rax
 	popfq
 
-	mov 2*8(%rsp), %rsp
+	mov 3*8(%rsp), %rsp
 	jmp *-(128/*red_zone*/ + 8/*rip push*/)(%rsp)
