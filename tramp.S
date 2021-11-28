@@ -1,9 +1,8 @@
 
 .text
-.global tramptramp
-.global exittramp
+.global tramptramp, exittramp
 tramptramp:
-	pushfq
+	pushfq      /* сохраняем регистры и флаги */
 	push %rax
 	push %rbx
 	push %rcx
@@ -18,18 +17,17 @@ tramptramp:
 	push %r13
 	push %r14
 	push %r15
-	push %rbp
+	push %rbp   /* rbp is the frame pointer. Тоже сохраняем, тк при вызове call может измениться */
 
-	mov %rsp, %rbx
-	mov %rsp, %rdi
-    mov 18*8(%rbx), %rsi
-    mov 17*8(%rbx), %rsp
-    call *16*8(%rbx)
-	mov %rbx, %rsp
-    jmp exittramp
+	mov %rsp, %rbx  /* сохраняем rsp */
+	mov %rsp, %rdi  /* передаем rsp как первыйй аргумент в bottom */
+    mov 18*8(%rbx), %rsi    /* sig как второй аргумент */
+    mov 17*8(%rbx), %rsp    /* переходим на стек текущего task */
+    call *16*8(%rbx)    /* вызываем bottom */
+	mov %rbx, %rsp  /* возвращаемся на наш стек */
 
 exittramp:
-    pop %rbp
+    pop %rbp    /* восстанавливаем реистры и флаги */
 	pop %r15
 	pop %r14
 	pop %r13
@@ -46,5 +44,5 @@ exittramp:
 	pop %rax
 	popfq
 
-	mov 3*8(%rsp), %rsp
-	jmp *-(128/*red_zone*/ + 8/*rip push*/)(%rsp)
+	mov 3*8(%rsp), %rsp     /* возвращаем rsp сохраненный в top */
+	jmp *-(128/*red_zone*/ + 8/*rip push*/)(%rsp)   /* переходим по rip в top, те выходим из top */
