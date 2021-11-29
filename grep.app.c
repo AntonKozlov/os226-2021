@@ -1,12 +1,26 @@
+#include <stddef.h>
 #include "usyscall.h"
 
 char *strstr(const char *where, const char *what) {
+	for (; *where != '\0'; where++)
+		for (const char *curWhere = where, *curWhat = what;; curWhere++, curWhat++) {
+			if (*curWhat == '\0') return where;
+			if (*curWhere != *curWhat) break;
+		}
+	return NULL;
 }
 
 void *memchr(const void *str, int c, long unsigned n) {
+	for (long unsigned i = 0; i < n; i++)
+		if (((char *)str)[i] == c) return str + i;
+	return NULL;
 }
 
 void *memmove(void *dst, const void *src, long unsigned n) {
+	char tmp[n];
+	for (long unsigned i = 0; i < n; i++) tmp[i] = ((char *) src)[i];
+	for (long unsigned i = 0; i < n; i++) ((char *) dst)[i] = tmp[i];
+	return dst;
 }
 
 int main(int argc, char* argv[]) {

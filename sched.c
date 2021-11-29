@@ -595,6 +595,7 @@ static int do_fork(unsigned long sp) {
 }
 
 int sys_exit(int code) {
+	for(int i = 0; i < FD_MAX; i++) sys_close(i);
 	doswitch();
 }
 
@@ -666,14 +667,43 @@ static int min(int a, int b) {
 	return a < b ? a : b;
 }
 
+static void pipe_run_q(struct pipe *p) {
+	struct task *t;
+	while ((t = pop_task(&p->q))) {
+		policy_run(t);
+	}
+}
+
 static int pipe_read(int fd, void *buf, unsigned sz) {
 	struct pipe *p = fd2pipe(fd, NULL);
-	return -1;
+	for (int i = 0; i < sz; i++) {
+		while (p->rd == p->wr) {
+			if (p->wrclose) return i;
+			current->next = p->q;
+			p->q = current;
+			doswitch();
+		}
+		((char *) buf)[i] = p->buf[p->rd];
+		p->rd = (p->rd + 1) % sizeof(p->buf);
+		pipe_run_q(p);
+	}
+	return sz;
 }
 
 static int pipe_write(int fd, const void *buf, unsigned sz) {
 	struct pipe *p = fd2pipe(fd, NULL);
-	return -1;
+	for (int i = 0; i < sz; i++) {
+		while (((p->wr + 1) % sizeof(p->buf)) == p->rd) {
+			if (p->rdclose) return i;
+			current->next = p->q;
+			p->q = current;
+			doswitch();
+		}
+		p->buf[p->wr] = ((char *) buf)[i];
+		p->wr = (p->wr + 1) % sizeof(p->buf);
+		pipe_run_q(p);
+	}
+	return sz;
 }
 
 static int pipe_close(int fd) {
@@ -687,10 +717,7 @@ static int pipe_close(int fd) {
 		p->wrclose = 1;
 	}
 
-	struct task *t;
-	while ((t = pop_task(&p->q))) {
-		policy_run(t);
-	}
+	pipe_run_q(p);
 
 	if (p->rdclose && p->wrclose) {
 		pool_free(&pipepool, p);

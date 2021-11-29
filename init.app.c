@@ -1,6 +1,9 @@
 #include "usyscall.h"
 
 long unsigned strlen(const char *str) {
+	const char *cur = str;
+	while (*cur != '\0') cur++;
+	return cur - str;
 }
 
 int os_print(int fd, const char *str) {
