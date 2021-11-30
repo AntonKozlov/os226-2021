@@ -10,7 +10,7 @@ char *strstr(const char *where, const char *what) {
             c_what++;
         }
         if (*c_what == '\0') return (char*) where;
-        where++
+        where++;
     }
     return 0;
 }

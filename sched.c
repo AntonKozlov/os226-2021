@@ -604,8 +604,8 @@ int sys_exit(int code) {
             if (current->fd[i]->ops->read == pipe_read) {
                 p->rdclose = 1;
             }
-            else if {
-                (current->fd[i]->ops->write == pipe_write) p->wrclose = 1;
+            else if (current->fd[i]->ops->write == pipe_write) {
+                p->wrclose = 1;
             }
             sys_close(i);
         }
