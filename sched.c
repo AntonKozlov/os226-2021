@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <limits.h>
 #include <string.h>
@@ -32,6 +33,10 @@
 #define USER_START ((void*)IUSERSPACE_START)
 #define USER_STACK_PAGES 2
 
+#define FD_MAX 16
+
+#define offsetof(s, f) ((unsigned long)(&((s*)0)->f))
+
 extern int shell(int argc, char *argv[]);
 
 extern void tramptramp(void);
@@ -41,6 +46,17 @@ struct vmctx {
 	unsigned map[USER_PAGES];
 	unsigned brk;
 	unsigned stack;
+};
+
+struct fileops {
+	int (*read)(int fd, void *buf, unsigned sz);
+	int (*write)(int fd, const void *buf, unsigned sz);
+	int (*close)(int fd);
+};
+
+struct file {
+	const struct fileops *ops;
+	int usecnt;
 };
 
 struct task {
@@ -55,6 +71,8 @@ struct task {
 			char **argv;
 		};
 	};
+
+	struct file *fd[FD_MAX];
 
 	void (*entry)(void *as);
 	void *as;
@@ -91,8 +109,21 @@ struct savedctx {
 	unsigned long rip;
 };
 
+struct pipe {
+	char buf[1024];
+	unsigned long rd, wr;
+	struct file rdend, wrend;
+	struct task *q;
+	unsigned rdclose : 1;
+	unsigned wrclose : 1;
+};
+static struct pipe pipearray[4];
+static struct pool pipepool = POOL_INITIALIZER_ARRAY(pipearray);
+
 static void syscallbottom(unsigned long sp);
 static int do_fork(unsigned long sp);
+static void set_fd(struct task *t, int fd, struct file *newf);
+static int pipe_read(int fd, void *buf, unsigned sz);
 
 static int time;
 
@@ -157,6 +188,19 @@ static void policy_run(struct task *t) {
 	*c = t;
 }
 
+static void push_task(struct task **q, struct task *t) {
+	t->next = *q;
+	*q = t;
+}
+
+static struct task *pop_task(struct task **q) {
+	struct task *t = *q;
+	if (t) {
+		*q = t->next;
+	}
+	return t;
+}
+
 static void vmctx_make(struct vmctx *vm, size_t stack_size) {
 	vm->stack = USER_PAGES - stack_size / PAGE_SIZE;
 	memset(vm->map, -1, sizeof(vm->map));
@@ -193,8 +237,7 @@ static void vmctx_apply(struct vmctx *vm) {
 
 static void doswitch(void) {
 	struct task *old = current;
-	current = runq;
-	runq = current->next;
+	current = pop_task(&runq);
 
 	current_start = sched_gettime();
 	vmctx_apply(&current->vm);
@@ -292,6 +335,13 @@ static unsigned long bottom(unsigned long sp, int sig) {
 static void top(int sig, siginfo_t *info, void *ctx) {
 	ucontext_t *uc = (ucontext_t *) ctx;
 	greg_t *regs = uc->uc_mcontext.gregs;
+
+	if (sig == SIGSEGV) {
+		uint16_t insn = *(uint16_t*)regs[REG_RIP];
+		if (insn != 0x81cd) {
+			abort();
+		}
+	}
 
 	unsigned long oldsp = regs[REG_RSP];
 	regs[REG_RSP] -= SYSV_REDST_SZ;
@@ -398,9 +448,9 @@ static void exectramp(void) {
 	abort();
 }
 
-static int do_exec(const char *path, char *argv[]) {
-	char elfpath[32] = "init.app";
-//	snprintf(elfpath, sizeof(elfpath), "%s.app", path);
+int sys_exec(const char *path, char **argv) {
+	char elfpath[32];
+	snprintf(elfpath, sizeof(elfpath), "%s.app", path);
 	int fd = open(elfpath, O_RDONLY);
 	if (fd < 0) {
 		perror("open");
@@ -496,11 +546,14 @@ static int do_exec(const char *path, char *argv[]) {
 
 static void inittramp(void* arg) {
 	char *args = { NULL };
-	do_exec("init", &args);
+	sys_exec("init", &args);
 }
 
 static void forktramp(void* arg) {
 	vmctx_apply(&current->vm);
+
+	struct savedctx *sc = arg;
+	sc->rax = 0;
 
 	struct ctx dummy;
 	struct ctx new;
@@ -533,12 +586,171 @@ static void vmctx_copy(struct vmctx *dst, struct vmctx *src) {
 
 static int do_fork(unsigned long sp) {
 	struct task *t = sched_new(forktramp, (void*)sp, 0);
-        vmctx_copy(&t->vm, &current->vm);
-        policy_run(t);
+	vmctx_copy(&t->vm, &current->vm);
+	for (int i = 0; i < FD_MAX; ++i) {
+		set_fd(t, i, current->fd[i]);
+	}
+	policy_run(t);
+	return t - taskarray + 1;
 }
 
 int sys_exit(int code) {
 	doswitch();
+}
+
+int sys_read(int fd, void *str, unsigned len) {
+	struct file *f = current->fd[fd];
+	if (!f || !f->ops->read) {
+		return -1;
+	}
+	return f->ops->read(fd, str, len);
+}
+
+int sys_write(int fd, const void *str, unsigned len) {
+	struct file *f = current->fd[fd];
+	if (!f || !f->ops->write) {
+		return -1;
+	}
+	return f->ops->write(fd, str, len);
+}
+
+static void set_fd(struct task *t, int fd, struct file *newf) {
+
+	if (newf) {
+		++newf->usecnt;
+	}
+
+	struct file *f = t->fd[fd];
+	if (f) {
+		if (--f->usecnt == 0 && f->ops->close) {
+			f->ops->close(fd);
+		}
+	}
+	t->fd[fd] = newf;
+}
+
+int sys_close(int fd) {
+	set_fd(current, fd, NULL);
+}
+
+static int find_fd(int from) {
+	for (int i = from; i < FD_MAX; ++i) {
+		if (!current->fd[i]) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int sys_dup(int fd) {
+	struct file *f = current->fd[fd];
+	int newfd = find_fd(0);
+	if (0 <= newfd) {
+		set_fd(current, newfd, f);
+	}
+	return newfd;
+}
+
+static struct pipe *fd2pipe(int fd, bool *read) {
+	struct file *f = current->fd[fd];
+	struct pipe *p;
+	bool r = f->ops->read == pipe_read;
+	if (read) {
+		*read = r;
+	}
+	int off = r ? offsetof(struct pipe, rdend) : offsetof(struct pipe, wrend);
+	return (struct pipe *)((char*)f - off);
+}
+
+static int min(int a, int b) {
+	return a < b ? a : b;
+}
+
+static int pipe_read(int fd, void *buf, unsigned sz) {
+	struct pipe *p = fd2pipe(fd, NULL);
+	return -1;
+}
+
+static int pipe_write(int fd, const void *buf, unsigned sz) {
+	struct pipe *p = fd2pipe(fd, NULL);
+	return -1;
+}
+
+static int pipe_close(int fd) {
+	struct file *f = current->fd[fd];
+
+	bool read;
+	struct pipe *p = fd2pipe(fd, &read);
+	if (read) {
+		p->rdclose = 1;
+	} else {
+		p->wrclose = 1;
+	}
+
+	struct task *t;
+	while ((t = pop_task(&p->q))) {
+		policy_run(t);
+	}
+
+	if (p->rdclose && p->wrclose) {
+		pool_free(&pipepool, p);
+	}
+}
+
+static const struct fileops pipe_rd_ops = {
+	.read = pipe_read,
+	.close = pipe_close,
+};
+static const struct fileops pipe_wr_ops = {
+	.write = pipe_write,
+	.close = pipe_close,
+};
+
+static void init_file(struct file *f, const struct fileops *ops) {
+	f->ops = ops;
+	f->usecnt = 0;
+}
+
+int sys_pipe(int *pipe) {
+	struct pipe *p = pool_alloc(&pipepool);
+	if (!p) {
+		goto err;
+	}
+
+	int fdr = find_fd(0);
+	if (fdr < 0) {
+		goto err_clean;
+	}
+	int fdw = find_fd(fdr + 1);
+	if (fdw < 0) {
+		goto err_clean;
+	}
+
+	p->rd = p->wr = 0;
+	p->q = NULL;
+
+	init_file(&p->rdend, &pipe_rd_ops);
+	init_file(&p->wrend, &pipe_wr_ops);
+
+	set_fd(current, fdr, &p->rdend);
+	set_fd(current, fdw, &p->wrend);
+
+	pipe[0] = fdr;
+	pipe[1] = fdw;
+	return 0;
+
+err_clean:
+	pool_free(&pipepool, p);
+err:
+	return -1;
+}
+
+static int fd_term_read(int fd, void *buf, unsigned sz) {
+	return read(0, buf, sz);
+}
+
+static int fd_term_write(int fd, const void *buf, unsigned sz) {
+	return write(1, buf, sz);
 }
 
 int main(int argc, char *argv[]) {
@@ -567,6 +779,17 @@ int main(int argc, char *argv[]) {
 	policy_cmp = prio_cmp;
 	struct task *t = sched_new(inittramp, NULL, 0);
 	vmctx_make(&t->vm, 4 * PAGE_SIZE);
+
+	struct file term;
+	struct fileops termops = {
+		.read = fd_term_read,
+		.write = fd_term_write,
+	};
+	init_file(&term, &termops);
+	set_fd(t, 0, &term);
+	set_fd(t, 1, &term);
+	set_fd(t, 2, &term);
+
 	policy_run(t);
 	sched_run();
 }

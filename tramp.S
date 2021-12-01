@@ -1,6 +1,7 @@
 
 .text
-.global tramptramp
+.global tramptramp, exittramp
+
 tramptramp:
 	pushfq
 	push %rax
@@ -20,19 +21,16 @@ tramptramp:
 	push %rbp
 	/* FIXME vfp, xmm ...*/
 
-	mov %rsp, %rbx
 	mov %rsp, %rdi
-	mov 18*8(%rbx), %rsi
-	mov 17*8(%rbx), %rsp
-	call *16*8(%rbx)
-	mov %rbx, %rsp
-	jmp exittramp
+	mov 18*8(%rsp), %rsi
+	mov 17*8(%rsp), %rsp
+	call *16*8(%rdi)
+	mov %rax, %rsp
 
-
-.global exittramp
 exittramp:
-    pop %rbp
-    pop %r15
+
+	pop %rbp
+	pop %r15
 	pop %r14
 	pop %r13
 	pop %r12

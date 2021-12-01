@@ -1,9 +1,14 @@
 #pragma once
 
 #define SYSCALL_X(x) \
-	x(print, int, 2, char*, str, int, len) \
+	x(read, int, 3, int, fd, void *, buf, unsigned, len) \
+	x(write, int, 3, int, fd, const void *, buf, unsigned, len) \
+	x(close, int, 1, int, fd) \
+	x(dup, int, 1, int, fd) \
+	x(pipe, int, 1, int *, pipe) \
 	x(fork, int, 0) \
 	x(exit, int, 1, int, code) \
+	x(exec, int, 2, const char *, name, char **, argv) \
 
 #define SC_NR(name, ...) os_syscall_nr_ ## name,
 enum syscalls_num {

@@ -11,32 +11,26 @@ typedef unsigned long (*sys_call_t)(
                 void *rest);
 
 #define SC_TRAMPOLINE0(ret, name) \
-	ret sys_ ## name(void); \
 	static unsigned long sys_tr_ ## name(unsigned long arg1, unsigned long arg2, unsigned long arg3, unsigned long arg4, void *rest) { \
 		return (ret) sys_ ## name(); \
 	}
 #define SC_TRAMPOLINE1(ret, name, type1, name1) \
-	ret sys_ ## name(type1); \
 	static unsigned long sys_tr_ ## name(unsigned long arg1, unsigned long arg2, unsigned long arg3, unsigned long arg4, void *rest) { \
 		return (ret) sys_ ## name((type1)arg1); \
 	}
 #define SC_TRAMPOLINE2(ret, name, type1, name1, type2, name2) \
-	ret sys_ ## name(type1, type2); \
 	static unsigned long sys_tr_ ## name(unsigned long arg1, unsigned long arg2, unsigned long arg3, unsigned long arg4, void *rest) { \
 		return (ret) sys_ ## name((type1)arg1, (type2)arg2); \
 	}
 #define SC_TRAMPOLINE3(ret, name, type1, name1, type2, name2, type3, name3) \
-	ret sys_ ## name(type1, type2, type3); \
 	static unsigned long sys_tr_ ## name(unsigned long arg1, unsigned long arg2, unsigned long arg3, unsigned long arg4, void *rest) { \
 		return (ret) sys_ ## name((type1)arg1, (type2)arg2, (type3)arg3); \
 	}
 #define SC_TRAMPOLINE4(ret, name, type1, name1, type2, name2, type3, name3, type4, name4) \
-	ret sys_ ## name(type1, type2, type3, type4); \
 	static unsigned long sys_tr_ ## name(unsigned long arg1, unsigned long arg2, unsigned long arg3, unsigned long arg4, void *rest) { \
 		return (ret) sys_ ## name((type1)arg1, (type2)arg2, (type3)arg3, (type4)arg4); \
 	}
 #define SC_TRAMPOLINE5(ret, name, type1, name1, type2, name2, type3, name3, type4, name4, type5, name5) \
-	ret sys_ ## name(type1, type2, type3, type4, void*); \
 	static unsigned long sys_tr_ ## name(unsigned long arg1, unsigned long arg2, unsigned long arg3, unsigned long arg4, void *rest) { \
 		return (ret) sys_ ## name((type1)arg1, (type2)arg2, (type3)arg3, (type4)arg4, rest); \
 	}
@@ -62,10 +56,6 @@ unsigned long syscall_do(int sysnum,
                 unsigned long arg3, unsigned long arg4,
                 void *rest) {
         return sys_table[sysnum](arg1, arg2, arg3, arg4, rest);
-}
-
-int sys_print(char *str, int len) {
-	return write(1, str, len);
 }
 
 int sys_fork(void) {

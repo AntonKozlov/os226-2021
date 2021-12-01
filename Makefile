@@ -14,12 +14,12 @@ main : $(patsubst %.c,%.o,$(patsubst %.S,%.o,$(filter-out %.app.c,$(wildcard *.[
 APPS = $(patsubst %.app.c,%.app,$(wildcard *.app.c))
 
 $(APPS) : %.app : %.app.c
-	$(CC) -fno-pic -Wl,-Ttext-segment=$(USERSPACE_START) -nostdlib -e main -static -x c $< -o $@
+	$(CC) -fno-stack-protector -fno-pic -Wl,-Ttext-segment=$(USERSPACE_START) -nostdlib -e main -static -x c $< -o $@
 
 all : $(APPS)
 
 clean :
-	rm -f *.o main
+	rm -f *.[od] main *.app
 
--include $(patsubst %,%.d,$(OBJ))
+-include $(wildcard *.d)
 
