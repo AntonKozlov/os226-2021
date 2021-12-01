@@ -124,6 +124,8 @@ static void syscallbottom(unsigned long sp);
 static int do_fork(unsigned long sp);
 static void set_fd(struct task *t, int fd, struct file *newf);
 static int pipe_read(int fd, void *buf, unsigned sz);
+static int pipe_write(int fd, const void* buf, unsigned int sz);
+static struct pipe *fd2pipe(int fd, bool *read);
 
 static int time;
 
@@ -450,7 +452,8 @@ static void exectramp(void) {
 
 int sys_exec(const char *path, char **argv) {
 	char elfpath[32];
-	snprintf(elfpath, sizeof(elfpath), "%s.app", path);
+    strcpy(elfpath, path);
+    strcat(elfpath, ".app");
 	int fd = open(elfpath, O_RDONLY);
 	if (fd < 0) {
 		perror("open");
@@ -595,6 +598,7 @@ static int do_fork(unsigned long sp) {
 }
 
 int sys_exit(int code) {
+    for(int i = 0; i < FD_MAX; i++) sys_close(i);
 	doswitch();
 }
 
@@ -667,13 +671,41 @@ static int min(int a, int b) {
 }
 
 static int pipe_read(int fd, void *buf, unsigned sz) {
-	struct pipe *p = fd2pipe(fd, NULL);
-	return -1;
+    struct pipe *p = fd2pipe(fd, NULL);
+    for (int i = 0; i < sz; i++) {
+        while (p->rd == p->wr) {
+            if (p->wrclose) return i;
+            current->next = p->q;
+            p->q = current;
+            doswitch();
+        }
+        ((char *) buf)[i] = p->buf[p->rd];
+        p->rd = (p->rd + 1) % sizeof(p->buf);
+        struct task *task;
+        while ((task = pop_task(&p->q))) {
+            policy_run(task);
+        }
+    }
+    return sz;
 }
 
 static int pipe_write(int fd, const void *buf, unsigned sz) {
 	struct pipe *p = fd2pipe(fd, NULL);
-	return -1;
+    for (int i = 0; i < sz; i++) {
+        while (((p->wr + 1) % sizeof(p->buf)) == p->rd) {
+            if (p->rdclose) return i;
+            current->next = p->q;
+            p->q = current;
+            doswitch();
+        }
+        p->buf[p->wr] = ((char *) buf)[i];
+        p->wr = (p->wr + 1) % sizeof(p->buf);
+        struct task *task;
+        while ((task = pop_task(&p->q))) {
+            policy_run(task);
+        }
+    }
+    return sz;
 }
 
 static int pipe_close(int fd) {
