@@ -487,7 +487,14 @@ int sys_exec(const char *path, char **argv) {
                 cpio_h->c_namesize + cpio_h->c_namesize % 2 +
                 filesize + filesize % 2;
     }
-
+    if (cpio_h->c_magic != 0x71c7) {
+        printf("cpio header mismatch\n");
+        return 1;
+    }
+    if ((cpio_h->c_mode & 0000400) == 0) {
+        printf("no read access\n");
+        return 1;
+    }
 	void *rawelf = (void *) (cpio_h + 1) + cpio_h->c_namesize + cpio_h->c_namesize % 2;
 
 	if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5)) {
