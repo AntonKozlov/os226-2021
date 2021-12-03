@@ -11,6 +11,7 @@
 #include <elf.h>
 #include <sys/mman.h>
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 
 #include "sched.h"
 #include "timer.h"
@@ -453,11 +454,41 @@ static void exectramp(void) {
 
 int sys_exec(const char *path, char **argv) {
 	char elfpath[32];
-	snprintf(elfpath, sizeof(elfpath), "%s.app", path);
+    strcpy(elfpath, path);
+    strcat(elfpath, ".app");
 
-	fprintf(stderr, "FIXME: find elf content in `rootfs`\n");
-	abort();
-	void *rawelf = NULL;
+    struct __attribute__((__packed__)) Cpio_Hdr {
+        unsigned short c_magic;         // Magic number 0x71c7
+        unsigned short c_dev;
+        unsigned short c_ino;
+        unsigned short c_mode;
+        unsigned short c_uid;
+        unsigned short c_gid;
+        unsigned short c_nlink;
+        unsigned short c_rdev;
+        unsigned short c_mtime[2];
+        unsigned short c_namesize;      // Length of filename
+        unsigned short c_filesize[2];   // Length of file
+    };
+
+    struct Cpio_Hdr* cpio_h = (struct Cpio_Hdr*) rootfs;
+
+    while (strcmp((const char *) (cpio_h + 1), elfpath) != 0) {
+        if (cpio_h->c_magic != 0x71c7) {
+            printf("cpio header mismatch\n");
+            return 1;
+        }
+        if (strcmp((const char *) (cpio_h + 1), "TRAILER!!!") == 0) {
+            printf("%s not found in cpio file\n", elfpath);
+            return 1;
+        }
+        unsigned filesize = ((unsigned) cpio_h->c_filesize[0] << 16) + cpio_h->c_filesize[1];
+        cpio_h = (void *) (cpio_h + 1) +
+                cpio_h->c_namesize + cpio_h->c_namesize % 2 +
+                filesize + filesize % 2;
+    }
+
+	void *rawelf = (void *) (cpio_h + 1) + cpio_h->c_namesize + cpio_h->c_namesize % 2;
 
 	if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5)) {
 		printf("ELF header mismatch\n");
