@@ -11,6 +11,7 @@
 #include <elf.h>
 #include <sys/mman.h>
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 
 #include "sched.h"
 #include "timer.h"
@@ -451,13 +452,50 @@ static void exectramp(void) {
 	abort();
 }
 
+#define CPIO_MAGIC 070707
+#define CPIO_ENDING "TRAILER!!!"
+
+struct __attribute__((__packed__)) cpio_hdr {
+    u_int16_t magic;        // Magic number 070707
+    u_int16_t dev;          // Device where file resides
+    u_int16_t ino;          // I-number of file
+    u_int16_t mode;         // File mode
+    u_int16_t uid;          // Owner user ID
+    u_int16_t gid;          // Owner group ID
+    u_int16_t nlink;        // Number of links to file
+    u_int16_t rdev;         // Device major/minor for special file
+    u_int16_t mtime[2];     // Modify time of file
+    u_int16_t namesize;     // Length of filename
+    u_int16_t filesize[2];  // Length of file
+};
+
+static void* hdr_data(struct cpio_hdr* hdr) {
+    return ((void*) (hdr + 1)) + hdr->namesize + (hdr->namesize % 2);
+}
+
+static void* hdr_next(struct cpio_hdr* hdr) {
+    u_int32_t filesize = ((((u_int32_t) hdr->filesize[0]) << (sizeof(u_int16_t) * CHAR_BIT)) + hdr->filesize[1]);
+    return hdr_data(hdr) + filesize + filesize % 2;
+}
+
 int sys_exec(const char *path, char **argv) {
 	char elfpath[32];
-	snprintf(elfpath, sizeof(elfpath), "%s.app", path);
+    strcpy(elfpath, path);
+    strcat(elfpath, ".app");
 
-	fprintf(stderr, "FIXME: find elf content in `rootfs`\n");
-	abort();
-	void *rawelf = NULL;
+    struct cpio_hdr* hdr;
+    for (hdr = rootfs; strncmp((char*) (hdr + 1), elfpath, hdr->namesize) != 0; hdr = hdr_next(hdr)) {
+        if (hdr->magic != CPIO_MAGIC) {
+            printf("cpio header mismatch\n");
+            return 1;
+        }
+        if (strncmp((char*) (hdr + 1), CPIO_ENDING, hdr->namesize) == 0) {
+            printf("path not found in cpio\n");
+            return 1;
+        }
+    }
+
+    void* rawelf = hdr_data(hdr);
 
 	if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5)) {
 		printf("ELF header mismatch\n");
