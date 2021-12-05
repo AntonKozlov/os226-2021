@@ -83,7 +83,7 @@ struct task {
 
 	// policy support
 	struct task *next;
-};
+} __attribute__((aligned(16)));
 
 struct savedctx {
 	unsigned long rbp;
