@@ -11,6 +11,7 @@
 #include <elf.h>
 #include <sys/mman.h>
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 
 #include "sched.h"
 #include "timer.h"
@@ -117,6 +118,21 @@ struct pipe {
 	unsigned rdclose : 1;
 	unsigned wrclose : 1;
 };
+
+struct header_old_cpio {
+	unsigned short   c_magic;
+	unsigned short   c_dev;
+	unsigned short   c_ino;
+	unsigned short   c_mode;
+	unsigned short   c_uid;
+	unsigned short   c_gid;
+	unsigned short   c_nlink;
+	unsigned short   c_rdev;
+	unsigned short   c_mtime[2];
+	unsigned short   c_namesize;
+	unsigned short   c_filesize[2];
+};
+
 static struct pipe pipearray[4];
 static struct pool pipepool = POOL_INITIALIZER_ARRAY(pipearray);
 
@@ -451,13 +467,43 @@ static void exectramp(void) {
 	abort();
 }
 
+static uint32_t header_old_cpio_filesize(struct header_old_cpio *header) {
+	return (((uint32_t) header->c_filesize[0]) << 16) + header->c_filesize[1];
+}
+
+void *header_old_cpio_name(struct header_old_cpio *header) {
+	return (void *) (header + 1);
+}
+
+void *header_old_cpio_content(struct header_old_cpio *header) {
+	return header_old_cpio_name(header) + header->c_namesize + header->c_namesize % 2;
+}
+
+void *header_old_cpio_next(struct header_old_cpio *header) {
+	uint32_t filesize = header_old_cpio_filesize(header);
+	return header_old_cpio_content(header) + filesize + filesize % 2;
+}
+
 int sys_exec(const char *path, char **argv) {
 	char elfpath[32];
 	snprintf(elfpath, sizeof(elfpath), "%s.app", path);
 
-	fprintf(stderr, "FIXME: find elf content in `rootfs`\n");
-	abort();
 	void *rawelf = NULL;
+
+	for(struct header_old_cpio *header = rootfs;; header = header_old_cpio_next(header)) {
+		if (header->c_magic != 070707) {
+			fprintf(stderr, "non cpio magic\n");
+			return 1;
+		}
+		if (strncmp(header_old_cpio_name(header), "TRAILER!!!", header->c_namesize) == 0) {
+			fprintf(stderr, "elf not found\n");
+			return 1;
+		}
+		if (strncmp(header_old_cpio_name(header), elfpath, header->c_namesize) == 0) {
+			rawelf = header_old_cpio_content(header);
+			break;
+		}
+	}
 
 	if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5)) {
 		printf("ELF header mismatch\n");
