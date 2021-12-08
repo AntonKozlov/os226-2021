@@ -11,6 +11,7 @@
 #include <elf.h>
 #include <sys/mman.h>
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 
 #include "sched.h"
 #include "timer.h"
@@ -36,6 +37,9 @@
 #define FD_MAX 16
 
 #define offsetof(s, f) ((unsigned long)(&((s*)0)->f))
+
+#define CPIO_MAGIC 0x71c7
+#define CPIO_END "TRAILER!!!"
 
 extern int shell(int argc, char *argv[]);
 
@@ -449,18 +453,55 @@ static void exectramp(void) {
 	abort();
 }
 
+struct old_header_cpio {
+	unsigned short c_magic;
+	unsigned short c_dev;
+	unsigned short c_ino;
+	unsigned short c_mode;
+	unsigned short c_uid;
+	unsigned short c_gid;
+	unsigned short c_nlink;
+	unsigned short c_rdev;
+	unsigned short c_mtime[2];
+	unsigned short c_namesize;
+	unsigned short c_filesize[2];
+};
+
+void *old_header_cpio_get_next(struct old_header_cpio *header) {
+	uint32_t filesize = (((uint32_t) header->c_filesize[0]) << 16) + header->c_filesize[1];
+	return (void *) (header + 1) + header->c_namesize + header->c_namesize % 2 + filesize + filesize % 2;
+}
+
 int sys_exec(const char *path, char **argv) {
 	char elfpath[32];
-	snprintf(elfpath, sizeof(elfpath), "%s.app", path);
-
-	fprintf(stderr, "FIXME: find elf content in `rootfs`\n");
-	abort();
 	void *rawelf = NULL;
 
-	if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5)) {
-		printf("ELF header mismatch\n");
-		return 1;
-	}
+	strcpy(elfpath, path);
+	strcat(elfpath, ".app");
+
+	for(struct old_header_cpio *header = rootfs;; header = old_header_cpio_get_next(header)) {
+		  if (header->c_magic != CPIO_MAGIC) {
+			printf("Non magic cpio!\n");
+
+			return 1;
+		  }
+
+		  if (strcmp((void *) (header + 1), CPIO_END) == 0) {
+			return 1;
+		  }
+
+		  if (strncmp((void *) (header + 1), elfpath, header->c_namesize) == 0) {
+			rawelf = (void *) (header + 1) + header->c_namesize + header->c_namesize % 2;
+
+			break;
+		  }
+		}
+
+		if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5)) {
+		  printf("ELF header mismatch\n");
+
+		  return 1;
+		}
 
 	// https://linux.die.net/man/5/elf
 	//
