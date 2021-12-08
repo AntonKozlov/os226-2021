@@ -11,6 +11,7 @@
 #include <elf.h>
 #include <sys/mman.h>
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 
 #include "sched.h"
 #include "timer.h"
@@ -256,15 +257,15 @@ static void tasktramp(void) {
 
 struct task *sched_new(void (*entrypoint)(void *), void *aspace, int priority, int alignment) {
 
-	struct task *t = pool_alloc(&taskpool);
-	t->entry = entrypoint;
-	t->as = aspace;
-	t->priority = priority;
-	t->next = NULL;
+    struct task *t = pool_alloc(&taskpool);
+    t->entry = entrypoint;
+    t->as = aspace;
+    t->priority = priority;
+    t->next = NULL;
 
-	ctx_make(&t->ctx, tasktramp, t->stack + sizeof(t->stack), alignment);
+    ctx_make(&t->ctx, tasktramp, t->stack + sizeof(t->stack), alignment);
 
-	return t;
+    return t;
 }
 
 void sched_sleep(unsigned ms) {
@@ -449,17 +450,51 @@ static void exectramp(void) {
 	abort();
 }
 
+struct old_header_cpio {
+	unsigned short c_magic;       // magic number 070707
+	unsigned short c_dev;         // Device where file resides
+	unsigned short c_ino;         // I-number of file
+	unsigned short c_mode;        // File mode
+	unsigned short c_uid;         // Owner user ID
+	unsigned short c_gid;         // Owner group ID
+	unsigned short c_nlink;       // Number of links to file
+	unsigned short c_rdev;        // Device major/minor for special file
+	unsigned short c_mtime[2];    // Modify time of file
+	unsigned short c_namesize;    // Length of filename
+	unsigned short c_filesize[2]; // Length of file
+};
+
+void *old_header_cpio_get_next(struct old_header_cpio *header) {
+	uint32_t filesize = (((uint32_t) header->c_filesize[0]) << 16) + header->c_filesize[1];
+	return (void *) (header + 1) + header->c_namesize + header->c_namesize % 2 + filesize + filesize % 2;
+}
+
 int sys_exec(const char *path, char **argv) {
 	char elfpath[32];
-	snprintf(elfpath, sizeof(elfpath), "%s.app", path);
 
-	fprintf(stderr, "FIXME: find elf content in `rootfs`\n");
-	abort();
 	void *rawelf = NULL;
 
-	if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5)) {
-		printf("ELF header mismatch\n");
+	strcpy(elfpath, path);
+	strcat(elfpath, ".app");
+
+	for(struct old_header_cpio *header = rootfs;; header = old_header_cpio_get_next(header)) {
+	  if (header->c_magic != 070707) {
+		printf("found non magic cpio \n");
 		return 1;
+	  }
+	  if (strcmp((void *) (header + 1), "TRAILER!!!") == 0) {
+		printf("not found elf in file\n");
+		return 1;
+	  }
+	  if (strncmp((void *) (header + 1), elfpath, header->c_namesize) == 0) {
+		rawelf = (void *) (header + 1) + header->c_namesize + header->c_namesize % 2;
+		break;
+	  }
+	}
+
+	if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5)) {
+	  printf("ELF header mismatch\n");
+	  return 1;
 	}
 
 	// https://linux.die.net/man/5/elf
