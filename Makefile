@@ -6,7 +6,7 @@ USERSPACE_START := 0x400000
 
 CFLAGS += -DIKERNEL_START=$(KERNEL_START) -DIUSERSPACE_START=$(USERSPACE_START)
 
-all : main
+all : main rootfs.cpio
 
 main : $(patsubst %.c,%.o,$(patsubst %.S,%.o,$(filter-out %.app.c,$(wildcard *.[cS]))))
 	$(CC) $(LDFLAGS) $^ $(LOADLIBES) $(LDLIBS) -o $@
@@ -16,10 +16,11 @@ APPS = $(patsubst %.app.c,%.app,$(wildcard *.app.c))
 $(APPS) : %.app : %.app.c
 	$(CC) -fno-stack-protector -fno-pic -Wl,-Ttext-segment=$(USERSPACE_START) -nostdlib -e main -static -x c $< -o $@
 
-all : $(APPS)
+rootfs.cpio : $(APPS)
+	ls -1 $^ | cpio -o -H bin > $@
 
 clean :
-	rm -f *.[od] main *.app
+	rm -f *.[od] main rootfs.cpio *.app
 
 -include $(wildcard *.d)
 

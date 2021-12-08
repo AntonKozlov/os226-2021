@@ -3,6 +3,7 @@
 *.o
 *.o.d
 /main
+/rootfs.cpio
 *.app
 
 # IDE and tooling
