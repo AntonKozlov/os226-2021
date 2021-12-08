@@ -33,6 +33,9 @@
 
 #define offsetof(s, f) ((unsigned long)(&((s*)0)->f))
 
+#define CPIO_MAGIC 0x71c7
+#define CPIO_END "END"
+
 struct Cpio_Hdr {
     unsigned short c_magic;
     unsigned short c_dev;
