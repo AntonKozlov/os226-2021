@@ -118,38 +118,81 @@ struct pipe {
 	unsigned rdclose : 1;
 	unsigned wrclose : 1;
 };
-static struct pipe pipearray[4];
-static struct pool pipepool = POOL_INITIALIZER_ARRAY(pipearray);
 
 static void syscallbottom(unsigned long sp);
 static int do_fork(unsigned long sp);
 static void set_fd(struct task *t, int fd, struct file *newf);
 static int pipe_read(int fd, void *buf, unsigned sz);
 
-static int time;
+#define LONG_BITS (sizeof(unsigned long) * CHAR_BIT)
 
-static int current_start;
-static struct task *current;
-static struct task *idle;
-static struct task *runq;
-static struct task *waitq;
+// --- shared
 
-static struct task *pendingq;
-static struct task *lastpending;
+// static struct pipe pipearray[4];
+// static struct pool pipepool = POOL_INITIALIZER_ARRAY(pipearray);
+//
+// static int time;
+//
+// static struct task *runq;
+// static struct task *waitq;
+//
+// static struct task *pendingq;
+// static struct task *lastpending;
+//
+// static int (*policy_cmp)(struct task *t1, struct task *t2);
+//
+// static struct task taskarray[16]; //+
+// static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
+//
+// static unsigned long bitmap_pages[MEM_PAGES / LONG_BITS];
 
-static int (*policy_cmp)(struct task *t1, struct task *t2);
+struct shared_data { // shared from below
+    struct pipe pipearray[4];
+    struct pool pipepool;
 
-static struct task taskarray[16];
-static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
+    int time;
+
+    struct task *runq;
+    struct task *waitq;
+
+    struct task *pendingq;
+    struct task *lastpending;
+
+    int (*policy_cmp)(struct task *t1, struct task *t2);
+
+    struct task taskarray[16];
+    struct pool taskpool;
+
+    unsigned long bitmap_pages[MEM_PAGES / LONG_BITS];
+};
+
+// --- private
+
+// static int current_start;
+// static struct task *current;
+// static struct task *idle;
+
+struct private_data {
+    int current_start;
+    struct task *current;
+    struct task *idle;
+};
+
+// --- globals
 
 static sigset_t irqs;
 
 static int memfd = -1;
-#define LONG_BITS (sizeof(unsigned long) * CHAR_BIT)
-static unsigned long bitmap_pages[MEM_PAGES / LONG_BITS];
 
 static void *rootfs;
 static unsigned long rootfs_sz;
+
+static int cpu_id = -1;
+
+static struct shared_data *shared_data;
+static struct private_data *private_data[2];
+
+// ---
 
 void irq_disable(void) {
 	sigprocmask(SIG_BLOCK, &irqs, NULL);
@@ -183,7 +226,7 @@ static void bitmap_free(unsigned long *bitmap, size_t size, unsigned v) {
 }
 
 static void policy_run(struct task *t) {
-	struct task **c = &runq;
+	struct task **c = &shared_data->runq;
 
 	while (*c && (t == idle || policy_cmp(*c, t) <= 0)) {
 		c = &(*c)->next;
@@ -369,25 +412,28 @@ long sched_gettime(void) {
 }
 
 void sched_run(void) {
-
 	sigemptyset(&irqs);
 	sigaddset(&irqs, SIGALRM);
 
-	/*timer_init(TICK_PERIOD, top);*/
+	timer_init(TICK_PERIOD, top);
 
 	irq_disable();
 
-	idle = pool_alloc(&taskpool);
-	memset(&idle->vm.map, -1, sizeof(idle->vm.map));
+    pid_t pid = fork();
+    cpu_id = pid ? 0 : 1;
 
-	current = idle;
+    private_data[cpu_id]->idle = pool_alloc(&shared_data->taskpool);
+	memset(&private_data[cpu_id]->idle->vm.map, -1, sizeof(private_data[cpu_id]->idle->vm.map));
+
+    private_data[cpu_id]->current = private_data[cpu_id]->idle;
 
 	sigset_t none;
 	sigemptyset(&none);
 
-	while (runq || waitq) {
-		if (runq) {
-			policy_run(current);
+	// need to sync
+    while (shared_data->runq || shared_data->waitq) {
+		if (shared_data->runq) {
+			policy_run(private_data[cpu_id]->current);
 			doswitch();
 		} else {
 			sigsuspend(&none);
@@ -875,7 +921,7 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	policy_cmp = prio_cmp;
+	shared_data->policy_cmp = prio_cmp;
 	struct task *t = sched_new(inittramp, NULL, 0);
 	vmctx_make(&t->vm, 4 * PAGE_SIZE);
 
