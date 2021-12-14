@@ -11,6 +11,7 @@
 #include <elf.h>
 #include <sys/mman.h>
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 
 #include "sched.h"
 #include "timer.h"
@@ -117,29 +118,67 @@ struct pipe {
 	unsigned rdclose : 1;
 	unsigned wrclose : 1;
 };
-static struct pipe pipearray[4];
-static struct pool pipepool = POOL_INITIALIZER_ARRAY(pipearray);
 
 static void syscallbottom(unsigned long sp);
 static int do_fork(unsigned long sp);
 static void set_fd(struct task *t, int fd, struct file *newf);
 static int pipe_read(int fd, void *buf, unsigned sz);
 
-static int time;
+#define LONG_BITS (sizeof(unsigned long) * CHAR_BIT)
 
-static int current_start;
-static struct task *current;
-static struct task *idle;
-static struct task *runq;
-static struct task *waitq;
+// --- shared
 
-static struct task *pendingq;
-static struct task *lastpending;
+// static struct pipe pipearray[4];
+// static struct pool pipepool = POOL_INITIALIZER_ARRAY(pipearray);
+//
+// static int time;
+//
+// static struct task *runq;
+// static struct task *waitq;
+//
+// static struct task *pendingq;
+// static struct task *lastpending;
+//
+// static int (*policy_cmp)(struct task *t1, struct task *t2);
+//
+// static struct task taskarray[16]; //+
+// static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
+//
+// static unsigned long bitmap_pages[MEM_PAGES / LONG_BITS];
 
-static int (*policy_cmp)(struct task *t1, struct task *t2);
+struct shared_data { // shared from below
+    struct pipe pipearray[4];
+    struct pool pipepool;
 
-static struct task taskarray[16];
-static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
+    int time;
+
+    struct task *runq;
+    struct task *waitq;
+
+    struct task *pendingq;
+    struct task *lastpending;
+
+    int (*policy_cmp)(struct task *t1, struct task *t2);
+
+    struct task taskarray[16];
+    struct pool taskpool;
+
+    unsigned long bitmap_pages[MEM_PAGES / LONG_BITS];
+};
+
+// --- private
+
+// static int current_start;
+// static struct task *current;
+// static struct task *idle;
+
+struct private_data {
+    int current_start;
+    struct task *current;
+    struct task *idle;
+};
+
+// --- globals
 
 static sigset_t irqs;
 
@@ -149,6 +188,13 @@ static unsigned long bitmap_pages[MEM_PAGES / LONG_BITS];
 
 static void *rootfs;
 static unsigned long rootfs_sz;
+
+static int cpu_id = -1;
+
+static struct shared_data *shared_data;
+static struct private_data *private_data[2];
+
+// ---
 
 void irq_disable(void) {
 	sigprocmask(SIG_BLOCK, &irqs, NULL);
@@ -182,7 +228,7 @@ static void bitmap_free(unsigned long *bitmap, size_t size, unsigned v) {
 }
 
 static void policy_run(struct task *t) {
-	struct task **c = &runq;
+	struct task **c = &shared_data->runq;
 
 	while (*c && (t == idle || policy_cmp(*c, t) <= 0)) {
 		c = &(*c)->next;
@@ -370,21 +416,25 @@ void sched_run(void) {
 	sigemptyset(&irqs);
 	sigaddset(&irqs, SIGALRM);
 
-	/*timer_init(TICK_PERIOD, top);*/
+	timer_init(TICK_PERIOD, top);
 
 	irq_disable();
 
-	idle = pool_alloc(&taskpool);
-	memset(&idle->vm.map, -1, sizeof(idle->vm.map));
+    pid_t pid = fork();
+    cpu_id = pid ? 0 : 1;
 
-	current = idle;
+    private_data[cpu_id]->idle = pool_alloc(&shared_data->taskpool);
+	memset(&private_data[cpu_id]->idle->vm.map, -1, sizeof(private_data[cpu_id]->idle->vm.map));
+
+    private_data[cpu_id]->current = private_data[cpu_id]->idle;
 
 	sigset_t none;
 	sigemptyset(&none);
 
-	while (runq || waitq) {
-		if (runq) {
-			policy_run(current);
+	// need to sync
+    while (shared_data->runq || shared_data->waitq) {
+		if (shared_data->runq) {
+			policy_run(private_data[cpu_id]->current);
 			doswitch();
 		} else {
 			sigsuspend(&none);
@@ -449,13 +499,50 @@ static void exectramp(void) {
 	abort();
 }
 
+#define CPIO_MAGIC 070707
+#define CPIO_ENDING "TRAILER!!!"
+
+struct __attribute__((__packed__)) cpio_hdr {
+    u_int16_t magic;        // Magic number 070707
+    u_int16_t dev;          // Device where file resides
+    u_int16_t ino;          // I-number of file
+    u_int16_t mode;         // File mode
+    u_int16_t uid;          // Owner user ID
+    u_int16_t gid;          // Owner group ID
+    u_int16_t nlink;        // Number of links to file
+    u_int16_t rdev;         // Device major/minor for special file
+    u_int16_t mtime[2];     // Modify time of file
+    u_int16_t namesize;     // Length of filename
+    u_int16_t filesize[2];  // Length of file
+};
+
+static void* hdr_data(struct cpio_hdr* hdr) {
+    return ((void*) (hdr + 1)) + hdr->namesize + (hdr->namesize % 2);
+}
+
+static void* hdr_next(struct cpio_hdr* hdr) {
+    u_int32_t filesize = ((((u_int32_t) hdr->filesize[0]) << (sizeof(u_int16_t) * CHAR_BIT)) + hdr->filesize[1]);
+    return hdr_data(hdr) + filesize + filesize % 2;
+}
+
 int sys_exec(const char *path, char **argv) {
 	char elfpath[32];
-	snprintf(elfpath, sizeof(elfpath), "%s.app", path);
+    strcpy(elfpath, path);
+    strcat(elfpath, ".app");
 
-	fprintf(stderr, "FIXME: find elf content in `rootfs`\n");
-	abort();
-	void *rawelf = NULL;
+    struct cpio_hdr* hdr;
+    for (hdr = rootfs; strncmp((char*) (hdr + 1), elfpath, hdr->namesize) != 0; hdr = hdr_next(hdr)) {
+        if (hdr->magic != CPIO_MAGIC) {
+            printf("cpio header mismatch\n");
+            return 1;
+        }
+        if (strncmp((char*) (hdr + 1), CPIO_ENDING, hdr->namesize) == 0) {
+            printf("path not found in cpio\n");
+            return 1;
+        }
+    }
+
+    void* rawelf = hdr_data(hdr);
 
 	if (strncmp(rawelf, "\x7f" "ELF" "\x2", 5)) {
 		printf("ELF header mismatch\n");
@@ -835,7 +922,7 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	policy_cmp = prio_cmp;
+	shared_data->policy_cmp = prio_cmp;
 	struct task *t = sched_new(inittramp, NULL, 0, STANDARD);
 	vmctx_make(&t->vm, 4 * PAGE_SIZE);
 

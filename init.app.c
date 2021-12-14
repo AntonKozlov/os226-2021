@@ -23,6 +23,7 @@ int main(int argc, char* argv[]) {
 		os_exit(1);
 	}
 	int pid = os_fork();
+    // fork 4 times, print indexes 1-4 from each in an endless loop
 	if (pid) {
 		os_close(1);
 		os_dup(pipe[1]);
