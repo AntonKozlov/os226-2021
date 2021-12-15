@@ -1,1 +1,1 @@
-$MAIN $B/../init.app | diffout 1
+#$MAIN $B/../init.app | diffout 1
