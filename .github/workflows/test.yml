@@ -16,6 +16,6 @@ jobs:
           - multithread
 
     steps:
-    - uses: actions/checkout@v2
-    - run: make
-    - run: ./test/run.sh ${{matrix.test}}
+      - uses: actions/checkout@v2
+      - run: make
+      - run: ./test/run.sh ${{matrix.test}}
