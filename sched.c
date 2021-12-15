@@ -183,7 +183,7 @@ void initialize_shared_mem() {
 
 static int unlocked = 0;
 static int locked = 1;
-static int fork_id = 0;
+static int fork_id = -1;
 
 bool strong_cas(int *ptr, int *expected, int *desired) {
     int old_expected = *expected;
