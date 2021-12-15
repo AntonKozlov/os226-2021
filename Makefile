@@ -9,7 +9,7 @@ CFLAGS += -DIKERNEL_START=$(KERNEL_START) -DIUSERSPACE_START=$(USERSPACE_START)
 all : main rootfs.cpio
 
 main : $(patsubst %.c,%.o,$(patsubst %.S,%.o,$(filter-out %.app.c,$(wildcard *.[cS]))))
-	$(CC) $(LDFLAGS) $^ $(LOADLIBES) $(LDLIBS) -o $@
+	$(CC) -pthread $(LDFLAGS) $^ $(LOADLIBES) $(LDLIBS) -o $@
 
 APPS = $(patsubst %.app.c,%.app,$(wildcard *.app.c))
 
