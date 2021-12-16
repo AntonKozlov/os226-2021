@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         test:
-          - exec
+          - multithread
 
     steps:
     - uses: actions/checkout@v2

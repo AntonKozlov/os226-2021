@@ -1,5 +1,11 @@
 #pragma once
 
+enum Alignment {
+    NONE,
+    STANDARD
+};
+
+
 struct ctx {
 	unsigned long rbx;
 	unsigned long r12;
@@ -11,7 +17,7 @@ struct ctx {
 	unsigned long rip;
 };
 
-extern void ctx_make(struct ctx *ctx, void *entry, void *stack);
+extern void ctx_make(struct ctx *ctx, void *entry, void *stack, int alignment);
 
 extern void ctx_switch(struct ctx *old, struct ctx *new);
 
