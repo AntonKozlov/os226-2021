@@ -32,13 +32,10 @@
 
 #define USER_PAGES 1024
 #define USER_START ((void*)IUSERSPACE_START)
-#define USER_STACK_PAGES 2
 
 #define FD_MAX 16
 
 #define offsetof(s, f) ((unsigned long)(&((s*)0)->f))
-
-extern int shell(int argc, char *argv[]);
 
 extern void tramptramp(void);
 extern void exittramp(void);
@@ -118,38 +115,59 @@ struct pipe {
 	unsigned rdclose : 1;
 	unsigned wrclose : 1;
 };
-static struct pipe pipearray[4];
-static struct pool pipepool = POOL_INITIALIZER_ARRAY(pipearray);
 
 static void syscallbottom(unsigned long sp);
 static int do_fork(unsigned long sp);
 static void set_fd(struct task *t, int fd, struct file *newf);
 static int pipe_read(int fd, void *buf, unsigned sz);
 
-static int time;
+// private ------------------------
 
+#define LONG_BITS (sizeof(unsigned long) * CHAR_BIT)
 static int current_start;
 static struct task *current;
 static struct task *idle;
-static struct task *runq;
-static struct task *waitq;
-
-static struct task *pendingq;
-static struct task *lastpending;
-
-static int (*policy_cmp)(struct task *t1, struct task *t2);
-
-static struct task taskarray[16];
-static struct pool taskpool = POOL_INITIALIZER_ARRAY(taskarray);
-
 static sigset_t irqs;
+static int sharedfd = -1;
+static int cpu_id = -1;
 
-static int memfd = -1;
-#define LONG_BITS (sizeof(unsigned long) * CHAR_BIT)
-static unsigned long bitmap_pages[MEM_PAGES / LONG_BITS];
+struct shared_data {
+    // shared
+    int time;
+    struct pipe pipearray[4];
+    struct pool pipepool; // initialize
+    struct task *runq;
+    struct task *waitq;
+    struct task taskarray[16];
+    struct pool taskpool; // initialize
+    unsigned long bitmap_pages[MEM_PAGES / LONG_BITS];
 
-static void *rootfs;
-static unsigned long rootfs_sz;
+    // read only
+    int memfd;
+    void *rootfs;
+    unsigned long rootfs_sz;
+    int (*policy_cmp)(struct task *t1, struct task *t2);
+} *shared_data;
+
+struct flock fl = {.l_whence = SEEK_SET, .l_start = 0, .l_len = 0};
+
+// ---------------------------------
+
+void lock_shared_data() {
+    fl.l_type = F_WRLCK;
+    if (fcntl(sharedfd, F_SETLKW, &fl) != 0) {
+        perror("fail share data locking");
+        abort();
+    }
+}
+
+void unlock_shared_data() {
+    fl.l_type = F_UNLCK;
+    if (fcntl(sharedfd, F_SETLKW, &fl) != 0) {
+        perror("fail share data unlocking");
+        abort();
+    }
+}
 
 void irq_disable(void) {
 	sigprocmask(SIG_BLOCK, &irqs, NULL);
@@ -183,9 +201,9 @@ static void bitmap_free(unsigned long *bitmap, size_t size, unsigned v) {
 }
 
 static void policy_run(struct task *t) {
-	struct task **c = &runq;
+	struct task **c = &shared_data->runq;
 
-	while (*c && (t == idle || policy_cmp(*c, t) <= 0)) {
+	while (*c && ((*c)->entry == NULL || shared_data->policy_cmp(*c, t) <= 0)) {
 		c = &(*c)->next;
 	}
 	t->next = *c;
@@ -209,7 +227,9 @@ static void vmctx_make(struct vmctx *vm, size_t stack_size) {
 	vm->stack = USER_PAGES - stack_size / PAGE_SIZE;
 	memset(vm->map, -1, sizeof(vm->map));
 	for (int i = 0; i < stack_size / PAGE_SIZE; ++i) {
-		int mempage = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
+        lock_shared_data();
+		int mempage = bitmap_alloc(shared_data->bitmap_pages, sizeof(shared_data->bitmap_pages));
+        unlock_shared_data();
 		if (mempage == -1) {
 			abort();
 		}
@@ -227,7 +247,7 @@ static void vmctx_apply(struct vmctx *vm) {
 				PAGE_SIZE,
 				PROT_READ | PROT_WRITE | PROT_EXEC,
 				MAP_SHARED | MAP_FIXED,
-				memfd, vm->map[i] * PAGE_SIZE);
+                shared_data->memfd, vm->map[i] * PAGE_SIZE);
 		if (addr == MAP_FAILED) {
 			perror("mmap");
 			abort();
@@ -241,7 +261,9 @@ static void vmctx_apply(struct vmctx *vm) {
 
 static void doswitch(void) {
 	struct task *old = current;
-	current = pop_task(&runq);
+    lock_shared_data();
+	current = pop_task(&shared_data->runq);
+    unlock_shared_data();
 
 	current_start = sched_gettime();
 	vmctx_apply(&current->vm);
@@ -256,8 +278,9 @@ static void tasktramp(void) {
 }
 
 struct task *sched_new(void (*entrypoint)(void *), void *aspace, int priority, int alignment) {
-
-	struct task *t = pool_alloc(&taskpool);
+    lock_shared_data();
+	struct task *t = pool_alloc(&shared_data->taskpool);
+    unlock_shared_data();
 	t->entry = entrypoint;
 	t->as = aspace;
 	t->priority = priority;
@@ -272,7 +295,9 @@ void sched_sleep(unsigned ms) {
 
 	if (!ms) {
 		irq_disable();
+        lock_shared_data();
 		policy_run(current);
+        unlock_shared_data();
 		doswitch();
 		irq_enable();
 		return;
@@ -283,12 +308,14 @@ void sched_sleep(unsigned ms) {
 	int curtime;
 	while ((curtime = sched_gettime()) < current->waketime) {
 		irq_disable();
-		struct task **c = &waitq;
+        lock_shared_data();
+		struct task **c = &shared_data->waitq;
 		while (*c && (*c)->waketime < current->waketime) {
 			c = &(*c)->next;
 		}
 		current->next = *c;
 		*c = current;
+        unlock_shared_data();
 
 		doswitch();
 		irq_enable();
@@ -309,17 +336,21 @@ static void hctx_push(greg_t *regs, unsigned long val) {
 }
 
 static void timerbottom() {
-	time += TICK_PERIOD;
+    lock_shared_data();
+    if (cpu_id == 0) shared_data->time += TICK_PERIOD;
 
-	while (waitq && waitq->waketime <= sched_gettime()) {
-		struct task *t = waitq;
-		waitq = waitq->next;
+	while (shared_data->waitq && shared_data->waitq->waketime <= sched_gettime()) {
+		struct task *t = shared_data->waitq;
+        shared_data->waitq = shared_data->waitq->next;
 		policy_run(t);
 	}
+    unlock_shared_data();
 
 	if (TICK_PERIOD <= sched_gettime() - current_start) {
 		irq_disable();
-		policy_run(current);
+        lock_shared_data();
+        policy_run(current);
+        unlock_shared_data();
 		doswitch();
 		irq_enable();
 	}
@@ -357,9 +388,9 @@ static void top(int sig, siginfo_t *info, void *ctx) {
 
 long sched_gettime(void) {
 	int cnt1 = timer_cnt() / 1000;
-	int time1 = time;
+	int time1 = shared_data->time;
 	int cnt2 = timer_cnt() / 1000;
-	int time2 = time;
+	int time2 = shared_data->time;
 
 	return (cnt1 <= cnt2) ?
 		time1 + cnt2 :
@@ -371,11 +402,14 @@ void sched_run(void) {
 	sigemptyset(&irqs);
 	sigaddset(&irqs, SIGALRM);
 
-	/*timer_init(TICK_PERIOD, top);*/
+    cpu_id = fork() ? 0 : 1;
+    timer_init(TICK_PERIOD, top);
 
 	irq_disable();
 
-	idle = pool_alloc(&taskpool);
+    lock_shared_data();
+    idle = pool_alloc(&shared_data->taskpool);
+    unlock_shared_data();
 	memset(&idle->vm.map, -1, sizeof(idle->vm.map));
 
 	current = idle;
@@ -383,11 +417,14 @@ void sched_run(void) {
 	sigset_t none;
 	sigemptyset(&none);
 
-	while (runq || waitq) {
-		if (runq) {
+	while (shared_data->runq || shared_data->waitq) {
+        lock_shared_data();
+		if (shared_data->runq) {
 			policy_run(current);
+            unlock_shared_data();
 			doswitch();
 		} else {
+            unlock_shared_data();
 			sigsuspend(&none);
 		}
 
@@ -421,13 +458,14 @@ static int vmctx_brk(struct vmctx *vm, void *addr) {
 		fprintf(stderr, "Out-of-mem\n");
 		abort();
 	}
-
+    lock_shared_data();
 	for (unsigned i = vm->brk; i < newbrk; ++i) {
-		vm->map[i] = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
+		vm->map[i] = bitmap_alloc(shared_data->bitmap_pages, sizeof(shared_data->bitmap_pages));
 	}
 	for (unsigned i = newbrk; i < vm->brk; ++i) {
-		bitmap_free(bitmap_pages, sizeof(bitmap_pages), vm->map[i]);
+		bitmap_free(shared_data->bitmap_pages, sizeof(shared_data->bitmap_pages), vm->map[i]);
 	}
+    unlock_shared_data();
 	vm->brk = newbrk;
 
 	return 0;
@@ -469,7 +507,7 @@ int sys_exec(const char *path, char **argv) {
         unsigned short c_filesize[2];   // Length of file
     };
 
-    struct Cpio_Hdr* cpio_h = (struct Cpio_Hdr*) rootfs;
+    struct Cpio_Hdr* cpio_h = (struct Cpio_Hdr*) shared_data->rootfs;
 
     while (strcmp((const char *) (cpio_h + 1), elfpath) != 0) {
         if (cpio_h->c_magic != 0x71c7) {
@@ -598,19 +636,21 @@ static void forktramp(void* arg) {
 }
 
 static void copyrange(struct vmctx *vm, unsigned from, unsigned to) {
-        for (unsigned i = from; i < to; ++i) {
-		vm->map[i] = bitmap_alloc(bitmap_pages, sizeof(bitmap_pages));
-		if (vm->map[i] == -1) {
-			abort();
-		}
-                if (-1 == pwrite(memfd,
-                                USER_START + i * PAGE_SIZE,
-                                PAGE_SIZE,
-				vm->map[i] * PAGE_SIZE)) {
-                        perror("pwrite");
-                        abort();
-                }
+    lock_shared_data();
+    for (unsigned i = from; i < to; ++i) {
+        vm->map[i] = bitmap_alloc(shared_data->bitmap_pages, sizeof(shared_data->bitmap_pages));
+        if (vm->map[i] == -1) {
+            abort();
         }
+        if (-1 == pwrite(shared_data->memfd,
+                         USER_START + i * PAGE_SIZE,
+                         PAGE_SIZE,
+                         vm->map[i] * PAGE_SIZE)) {
+            perror("pwrite");
+            abort();
+        }
+    }
+    unlock_shared_data();
 }
 
 static void vmctx_copy(struct vmctx *dst, struct vmctx *src) {
@@ -626,8 +666,11 @@ static int do_fork(unsigned long sp) {
 	for (int i = 0; i < FD_MAX; ++i) {
 		set_fd(t, i, current->fd[i]);
 	}
+    lock_shared_data();
 	policy_run(t);
-	return t - taskarray + 1;
+    int pid = t - shared_data->taskarray + 1;
+    unlock_shared_data();
+    return pid;
 }
 
 int sys_exit(int code) {
@@ -722,7 +765,9 @@ static int pipe_read(int fd, void *buf, unsigned sz) {
 		sz -= data;
 		struct task *t = pop_task(&p->q);
 		if (t) {
-			policy_run(t);
+            lock_shared_data();
+            policy_run(t);
+            unlock_shared_data();
 		}
 	} while (sz && !p->wrclose);
 	return rdbuf - buf;
@@ -748,15 +793,15 @@ static int pipe_write(int fd, const void *buf, unsigned sz) {
 		sz -= data;
 		struct task *t = pop_task(&p->q);
 		if (t) {
-			policy_run(t);
+            lock_shared_data();
+            policy_run(t);
+            unlock_shared_data();
 		}
 	} while (sz && !p->rdclose);
 	return wrbuf - buf;
 }
 
 static int pipe_close(int fd) {
-	struct file *f = current->fd[fd];
-
 	bool read;
 	struct pipe *p = fd2pipe(fd, &read);
 	if (read) {
@@ -766,12 +811,16 @@ static int pipe_close(int fd) {
 	}
 
 	struct task *t;
+    lock_shared_data();
 	while ((t = pop_task(&p->q))) {
 		policy_run(t);
 	}
+    unlock_shared_data();
 
 	if (p->rdclose && p->wrclose) {
-		pool_free(&pipepool, p);
+        lock_shared_data();
+        pool_free(&shared_data->pipepool, p);
+        unlock_shared_data();
 	}
 }
 
@@ -790,7 +839,9 @@ static void init_file(struct file *f, const struct fileops *ops) {
 }
 
 int sys_pipe(int *pipe) {
-	struct pipe *p = pool_alloc(&pipepool);
+    lock_shared_data();
+    struct pipe *p = pool_alloc(&shared_data->pipepool);
+    unlock_shared_data();
 	if (!p) {
 		goto err;
 	}
@@ -818,7 +869,9 @@ int sys_pipe(int *pipe) {
 	return 0;
 
 err_clean:
-	pool_free(&pipepool, p);
+    lock_shared_data();
+    pool_free(&shared_data->pipepool, p);
+    unlock_shared_data();
 err:
 	return -1;
 }
@@ -843,13 +896,39 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	memfd = memfd_create("mem", 0);
-	if (memfd < 0) {
+    // init shared data
+
+    sharedfd = memfd_create("shared", 0);
+    if (sharedfd < 0) {
+        perror("memfd_create sharedfd");
+        abort();
+    }
+
+    if (ftruncate(sharedfd, sizeof(struct shared_data)) < 0) {
+        perror("ftrucate sharedfd");
+        abort();
+    }
+
+    shared_data = mmap(NULL, sizeof(struct shared_data), PROT_READ | PROT_WRITE, MAP_SHARED, sharedfd, 0);
+    if (shared_data == MAP_FAILED) {
+        perror("mmap shared_data");
+        abort();
+    }
+
+    *shared_data = (struct shared_data) {
+        .time = 0,
+        .pipepool = POOL_INITIALIZER_ARRAY(shared_data->pipearray),
+        .taskpool = POOL_INITIALIZER_ARRAY(shared_data->taskarray)};
+
+    //---------------
+
+    shared_data->memfd = memfd_create("mem", 0);
+	if (shared_data->memfd < 0) {
 		perror("memfd_create");
 		return 1;
 	}
 
-	if (ftruncate(memfd, PAGE_SIZE * MEM_PAGES) < 0) {
+	if (ftruncate(shared_data->memfd, PAGE_SIZE * MEM_PAGES) < 0) {
 		perror("ftrucate");
 		return 1;
 	}
@@ -866,14 +945,14 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	rootfs_sz = st.st_size;
-	rootfs = mmap(NULL, rootfs_sz, PROT_READ, MAP_PRIVATE, fd, 0);
-	if (rootfs == MAP_FAILED) {
+    shared_data->rootfs_sz = st.st_size;
+    shared_data->rootfs = mmap(NULL, shared_data->rootfs_sz, PROT_READ, MAP_PRIVATE, fd, 0);
+	if (shared_data->rootfs == MAP_FAILED) {
 		perror("mmap rootfs");
 		return 1;
 	}
 
-	policy_cmp = prio_cmp;
+    shared_data->policy_cmp = prio_cmp;
 	struct task *t = sched_new(inittramp, NULL, 0, STANDARD);
 	vmctx_make(&t->vm, 4 * PAGE_SIZE);
 
