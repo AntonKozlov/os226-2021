@@ -127,25 +127,25 @@ static int pipe_read(int fd, void *buf, unsigned sz);
 static int current_start;
 static struct task *current;
 static struct task *idle;
-static sigset_t irqs;
-static int sharedfd = -1;
 static int cpu_id = -1;
 
 struct shared_data {
     // shared
     int time;
     struct pipe pipearray[4];
-    struct pool pipepool; // initialize
+    struct pool pipepool;
     struct task *runq;
     struct task *waitq;
     struct task taskarray[16];
-    struct pool taskpool; // initialize
+    struct pool taskpool;
     unsigned long bitmap_pages[MEM_PAGES / LONG_BITS];
 
     // read only
     int memfd;
     void *rootfs;
     unsigned long rootfs_sz;
+    sigset_t irqs;
+    int sharedfd;
     int (*policy_cmp)(struct task *t1, struct task *t2);
 } *shared_data;
 
@@ -155,7 +155,7 @@ struct flock fl = {.l_whence = SEEK_SET, .l_start = 0, .l_len = 0};
 
 void lock_shared_data() {
     fl.l_type = F_WRLCK;
-    if (fcntl(sharedfd, F_SETLKW, &fl) != 0) {
+    if (fcntl(shared_data->sharedfd, F_SETLKW, &fl) != 0) {
         perror("fail share data locking");
         abort();
     }
@@ -163,18 +163,18 @@ void lock_shared_data() {
 
 void unlock_shared_data() {
     fl.l_type = F_UNLCK;
-    if (fcntl(sharedfd, F_SETLKW, &fl) != 0) {
+    if (fcntl(shared_data->sharedfd, F_SETLKW, &fl) != 0) {
         perror("fail share data unlocking");
         abort();
     }
 }
 
 void irq_disable(void) {
-	sigprocmask(SIG_BLOCK, &irqs, NULL);
+	sigprocmask(SIG_BLOCK, &shared_data->irqs, NULL);
 }
 
 void irq_enable(void) {
-	sigprocmask(SIG_UNBLOCK, &irqs, NULL);
+	sigprocmask(SIG_UNBLOCK, &shared_data->irqs, NULL);
 }
 
 static int bitmap_alloc(unsigned long *bitmap, size_t size) {
@@ -399,8 +399,8 @@ long sched_gettime(void) {
 
 void sched_run(void) {
 
-	sigemptyset(&irqs);
-	sigaddset(&irqs, SIGALRM);
+	sigemptyset(&shared_data->irqs);
+	sigaddset(&shared_data->irqs, SIGALRM);
 
     cpu_id = fork() ? 0 : 1;
     timer_init(TICK_PERIOD, top);
@@ -898,7 +898,7 @@ int main(int argc, char *argv[]) {
 
     // init shared data
 
-    sharedfd = memfd_create("shared", 0);
+    int sharedfd = memfd_create("shared", 0);
     if (sharedfd < 0) {
         perror("memfd_create sharedfd");
         abort();
@@ -917,6 +917,7 @@ int main(int argc, char *argv[]) {
 
     *shared_data = (struct shared_data) {
         .time = 0,
+        .sharedfd = sharedfd,
         .pipepool = POOL_INITIALIZER_ARRAY(shared_data->pipearray),
         .taskpool = POOL_INITIALIZER_ARRAY(shared_data->taskarray)};
 
